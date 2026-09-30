@@ -14,6 +14,7 @@ import { OrderSuccessPage, StaticPage } from "./pages/AccountPages";
 import { StoreVisitPageV2 } from "./pages/StoreVisitPageV2";
 import { AdminPolishedWorkspace } from "./pages/AdminPolishedWorkspace";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { AdminAccessGate } from "./pages/AdminAccessGate";
 
 const configuredAdminHost = String(import.meta.env.VITE_ADMIN_HOST ?? "admin.ridershoes.coderiq.in").trim().toLowerCase();
 
@@ -21,9 +22,6 @@ export function App(){
   const location=useLocation();
   const {isLoading,toast}=useApp();
   const isAdminPath=location.pathname.startsWith("/admin");
-  // React Router's Location object does not contain the browser hostname.
-  // Read it from window.location so the dedicated admin subdomain can be
-  // distinguished from the public storefront on the same Vercel deployment.
   const currentHostname=typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
   const isAdminHost=Boolean(configuredAdminHost)&&currentHostname===configuredAdminHost;
   const adminHostMode=Boolean(configuredAdminHost);
@@ -33,15 +31,15 @@ export function App(){
     document.title=`${page||"Rider Shoes"} — Rider Shoes`;
   },[location.pathname]);
 
-  // Dedicated admin hostname: / is the protected admin entry point and
-  // /admin is only reachable after the admin hostname gate has been applied.
+  // The dedicated admin hostname is the only place where the admin workspace
+  // can render. Public-host /admin URLs are sent back to the storefront.
   if(adminHostMode && !isAdminHost && isAdminPath) return <Navigate to="/" replace/>;
   if(adminHostMode && isAdminHost && !isAdminPath) return <Navigate to="/admin" replace/>;
 
-  if(isAdminPath) return <Routes>
+  if(isAdminPath) return <AdminAccessGate><Routes>
     <Route path="/admin/users" element={<AdminUsersPage/>}/>
     <Route path="/admin/*" element={<AdminPolishedWorkspace/>}/>
-  </Routes>;
+  </Routes></AdminAccessGate>;
 
   return <CustomerShell>
     {toast&&<motion.div className="toast" initial={{opacity:0,y:15}} animate={{opacity:1,y:0}}>{toast}</motion.div>}
