@@ -16,7 +16,8 @@ import { StoreVisitPageV2 } from "./pages/StoreVisitPageV2";
 import { AdminPolishedWorkspace } from "./pages/AdminPolishedWorkspace";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 
-const configuredAdminHost = String(import.meta.env.VITE_ADMIN_HOST ?? "").trim().toLowerCase();
+// Admin portal hostname. VITE_ADMIN_HOST can override this later if needed.
+const configuredAdminHost = String(import.meta.env.VITE_ADMIN_HOST ?? "admin.ridershoes.coderiq.in").trim().toLowerCase();
 
 export function App(){
   const location=useLocation();
