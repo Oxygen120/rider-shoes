@@ -6,6 +6,7 @@ import { AuthProvider } from "./app/AuthContext";
 import { App } from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import "./styles.css";
+import "./glass-enhancements.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
