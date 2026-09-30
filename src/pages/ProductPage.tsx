@@ -17,19 +17,30 @@ export function ProductPage(){
   useEffect(()=>{const c=getSupabaseClient();if(!c)return;c.from("business_settings").select("setting_value").eq("setting_key","store.settings").maybeSingle().then(({data})=>{const s=(data?.setting_value||{}) as any;setVisitEnabled(s.storeVisitEnabled!==false);setVisitDiscount(Number(s.storeVisitDiscount||0));setVisitType(s.storeVisitDiscountType==="fixed"?"fixed":"percent")})},[]);
   useEffect(()=>{if(product){setColor(product.colors[0]||"");setSize("")}},[product?.id]);
   if(!product)return <div className="section"><div className="container-narrow"><div className="empty-state"><h2>That pair has moved on.</h2><Link className="button button-primary" to="/shop">Back to shop <ArrowRight size={14}/></Link></div></div></div>;
-  const variant=useMemo(()=>size?product.variants.find(v=>v.size===size&&(!color||v.color===color)):undefined,[color,product.variants,size]);
+  const variant=useMemo(()=>{
+    if(!size)return undefined;
+    return product.variants.find(v=>v.size===size&&(!color||!v.color||v.color===color))
+      ?? product.variants.find(v=>v.size===size);
+  },[color,product.variants,size]);
+  const variantAvailable=Boolean(variant&&(variant.stockQuantity==null||variant.stockQuantity>0));
   const inCart=variant?cart.some(x=>x.productId===product.id&&x.variantId===variant.id):false;
   const discount=product.compareAtPrice&&product.compareAtPrice>product.price?Math.round((1-product.price/product.compareAtPrice)*100):0;
   const related=products.filter(x=>x.id!==product.id&&x.categoryIds.some(id=>product.categoryIds.includes(id))).slice(0,4);
   const checkDelivery=()=>setDeliveryMessage(pincode.length===6?`We will confirm delivery to ${pincode} at checkout.`:"Enter a valid 6-digit pincode.");
-  const addOrCheckout=()=>{if(!size){setDeliveryMessage("Please select a size before adding to cart.");return}if(!variant){setDeliveryMessage("That size is not available.");return}if(inCart){navigate("/cart");return}addToCart(product,variant,quantity)};
+  const addOrCheckout=()=>{
+    if(!size){setDeliveryMessage("Please select a size before adding to cart.");return}
+    if(!variant){setDeliveryMessage("That size is not available.");return}
+    if(!variantAvailable){setDeliveryMessage("This size is currently out of stock.");return}
+    if(inCart){navigate("/checkout");return}
+    addToCart(product,variant,quantity);
+  };
   const openVisit=()=>{setVisitOpen(true);setVisitResult("");setVisitError("");setVisit({name:"",phone:"",email:""})};
   const register=async()=>{
     const name=visit.name.trim(),phone=visit.phone.replace(/\D/g,"").slice(0,10),email=visit.email.trim();
     setVisitError("");setVisitResult("");
     if(name.length<2){setVisitError("Please enter your name.");return}
     if(phone.length!==10){setVisitError("Please enter a valid 10-digit mobile number.");return}
-    if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setVisitError("Please enter a valid email address or leave it blank.");return}
+    if(email&&!/^\S+@\S+\.\S+$/.test(email)){setVisitError("Please enter a valid email address or leave it blank.");return}
     setVisitBusy(true);
     try{
       const c=getSupabaseClient();if(!c)throw Error("Store registration is unavailable right now.");
@@ -42,14 +53,15 @@ export function ProductPage(){
       setVisitResult(ref);setVisit({name:"",phone:"",email:""});
     }catch(e){setVisitError(e instanceof Error?e.message:"Unable to register your store visit")}finally{setVisitBusy(false)}
   };
+  const stockLabel=!size?(product.inStock?"Select size":"Check store availability"):(variantAvailable?"In stock":"Unavailable");
   return <>
     <Breadcrumbs current={product.name}/><section className="section-tight"><div className="container-wide"><div className="product-detail">
       <div className="gallery"><div className="thumbs">{product.images.map((image,i)=><button key={image.id} className={`thumb ${imageIndex===i?"active":""}`} onClick={()=>setImageIndex(i)}><img src={image.url} alt={`${product.name} view ${i+1}`}/></button>)}</div><div className="gallery-main"><img src={product.images[imageIndex]?.url||product.imageUrl} alt={product.name}/></div></div>
       <div className="detail-copy"><div className="product-brand">{product.brand?.name||"Rider collection"} · {product.badge||"Everyday movement"}</div><h1>{product.name}</h1><Stars rating={product.rating||0} reviewCount={product.reviewCount}/><p className="lead">{product.description}</p><div className="detail-price"><span className="price">₹{product.price.toLocaleString("en-IN")}</span>{product.compareAtPrice&&<span className="compare">₹{product.compareAtPrice.toLocaleString("en-IN")}</span>}{discount>0&&<span className="discount">{discount}% off</span>}</div>
         {product.colors.length>0&&<div className="detail-block"><div className="detail-label"><span>Color</span><span>{color}</span></div><div className="color-list">{product.colors.map(c=><button key={c} className={`color-option ${color===c?"active":""}`} onClick={()=>setColor(c)}>{c}</button>)}</div></div>}
         <div className="detail-block"><div className="detail-label"><span>Size</span><strong style={{color:"var(--coral)"}}>{size?`Selected ${size}`:"Select a size"}</strong></div><div className="size-list">{product.sizes.map(s=><button key={s} className={`size-option ${size===s?"active":""}`} onClick={()=>{setSize(s);setDeliveryMessage("")}}>{s}</button>)}</div></div>
-        <div className="detail-block" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:15}}><div><div className="detail-label" style={{marginBottom:8}}>Quantity</div><div className="quantity-control"><button onClick={()=>setQuantity(x=>Math.max(1,x-1))}><Minus size={14}/></button><strong>{quantity}</strong><button onClick={()=>setQuantity(x=>Math.min(5,x+1))}><Plus size={14}/></button></div></div><span style={{display:"inline-flex",alignItems:"center",gap:7,color:product.inStock?"#31815c":"var(--coral)",fontSize:".75rem",fontWeight:800}}><Check size={15}/>{product.inStock?"In stock":"Unavailable"}</span></div>
-        <div className="detail-actions"><button className="button button-primary" onClick={addOrCheckout} disabled={!product.inStock}>{inCart?"Checkout":"Add to cart"}<ArrowRight size={15}/></button>{visitEnabled&&<button className="button button-outline" onClick={openVisit} disabled={!product.inStock}>Buy from Store</button>}</div>
+        <div className="detail-block" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:15}}><div><div className="detail-label" style={{marginBottom:8}}>Quantity</div><div className="quantity-control"><button onClick={()=>setQuantity(x=>Math.max(1,x-1))}><Minus size={14}/></button><strong>{quantity}</strong><button onClick={()=>setQuantity(x=>Math.min(5,x+1))}><Plus size={14}/></button></div></div><span style={{display:"inline-flex",alignItems:"center",gap:7,color:variantAvailable?"#31815c":"var(--coral)",fontSize:".75rem",fontWeight:800}}><Check size={15}/>{stockLabel}</span></div>
+        <div className="detail-actions"><button className="button button-primary" onClick={addOrCheckout}>{inCart?"Checkout":"Add to cart"}<ArrowRight size={15}/></button>{visitEnabled&&<button className="button button-outline" onClick={openVisit}>Buy from Store</button>}</div>
         {deliveryMessage&&<div className="error-text" style={{marginTop:10}}>{deliveryMessage}</div>}
         <div className="detail-block"><div className="detail-label"><span>Delivery checker</span><span>{settings.deliveryEstimate}</span></div><div style={{display:"flex",gap:8}}><input value={pincode} onChange={e=>setPincode(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="Enter pincode" inputMode="numeric" style={{flex:1,minHeight:42,border:"1px solid var(--line)",borderRadius:11,padding:"0 12px"}}/><button className="button button-dark button-small" onClick={checkDelivery}>Check</button></div></div>
         {visitEnabled&&visitDiscount>0&&<div className="detail-block" style={{background:"#fff7ef",borderRadius:12,padding:12}}><strong>Store visit offer</strong><div style={{fontSize:".72rem",marginTop:5,color:"var(--muted)"}}>Register a store visit and receive {visitType==="fixed"?`₹${visitDiscount}`:`${visitDiscount}%`} extra discount at the store.</div></div>}
