@@ -1,49 +1,41 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Check, Heart, Minus, Plus, RotateCcw, ShieldCheck, Truck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Check, Minus, Plus, RotateCcw, ShieldCheck, Truck, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useApp } from "../app/AppContext";
 import { Breadcrumbs } from "../components/SiteLayout";
 import { ProductCard, SectionHeading, Stars } from "../components/Ui";
+import { getSupabaseClient } from "../lib/supabase";
 
-export function ProductPage() {
-  const { slug } = useParams();
-  const navigate = useNavigate();
-  const { products, addToCart, toggleWishlist, isWishlisted, settings } = useApp();
-  const product = products.find((item) => item.slug === slug);
-  const [imageIndex, setImageIndex] = useState(0);
-  const [size, setSize] = useState(product?.sizes[0] ?? "");
-  const [color, setColor] = useState(product?.colors[0] ?? "");
-  const [quantity, setQuantity] = useState(1);
-  const [pincode, setPincode] = useState("");
-  const [deliveryMessage, setDeliveryMessage] = useState("");
-  const variant = useMemo(() => product?.variants.find((item) => item.size === size && item.color === color) ?? product?.variants[0], [color, product?.variants, size]);
-  if (!product) return <div className="section"><div className="container-narrow"><div className="empty-state"><h2>That pair has moved on.</h2><p>We could not find this product, but there are plenty more steps to explore.</p><Link className="button button-primary" to="/shop">Back to shop <ArrowRight size={14} /></Link></div></div></div>;
-  const saved = isWishlisted(product.id);
-  const discount = product.compareAtPrice && product.compareAtPrice > product.price ? Math.round((1 - product.price / product.compareAtPrice) * 100) : 0;
-  const related = products.filter((item) => item.id !== product.id && item.categoryIds.some((id) => product.categoryIds.includes(id))).slice(0, 4);
-  const checkDelivery = () => {
-    const allowed = ["385310", "560001", "380001", "110001", "400001"];
-    setDeliveryMessage(pincode.length === 6 && allowed.includes(pincode) ? `Good news — we deliver to ${pincode}.` : "Enter a serviceable 6-digit pincode to check delivery.");
-  };
-  const buyNow = () => {
-    addToCart(product, variant, quantity);
-    navigate("/cart");
-  };
-  return (
-    <>
-      <Breadcrumbs current={product.name} />
-      <section className="section-tight"><div className="container-wide"><div className="product-detail">
-        <div className="gallery"><div className="thumbs">{product.images.map((image, index) => <button key={image.id} className={`thumb ${imageIndex === index ? "active" : ""}`} onClick={() => setImageIndex(index)}><img src={image.url} alt={`${product.name} view ${index + 1}`} /></button>)}</div><div className="gallery-main"><img src={product.images[imageIndex]?.url ?? product.imageUrl} alt={product.images[imageIndex]?.altText ?? product.name} /></div></div>
-        <div className="detail-copy"><div className="product-brand">{product.brand?.name ?? "Rider collection"} · {product.badge ?? "Everyday movement"}</div><h1>{product.name}</h1><Stars rating={product.rating ?? 0} reviewCount={product.reviewCount} /><p className="lead">{product.description}</p><div className="detail-price"><span className="price">₹{product.price.toLocaleString("en-IN")}</span>{product.compareAtPrice && <span className="compare">₹{product.compareAtPrice.toLocaleString("en-IN")}</span>}{discount > 0 && <span className="discount">{discount}% off</span>}</div>
-          <div className="detail-block"><div className="detail-label"><span>Color</span><span style={{ color: "var(--muted)", fontWeight: 500 }}>{color}</span></div><div className="color-list">{product.colors.map((item) => <button key={item} className={`color-option ${color === item ? "active" : ""}`} onClick={() => setColor(item)}>{item}</button>)}</div></div>
-          <div className="detail-block"><div className="detail-label"><span>Size</span><span style={{ color: "var(--coral)", fontWeight: 700 }}>Size guide</span></div><div className="size-list">{product.sizes.map((item) => <button key={item} className={`size-option ${size === item ? "active" : ""}`} onClick={() => setSize(item)}>{item}</button>)}</div></div>
-          <div className="detail-block" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 15 }}><div><div className="detail-label" style={{ marginBottom: 8 }}>Quantity</div><div className="quantity-control"><button onClick={() => setQuantity((value) => Math.max(1, value - 1))} aria-label="Decrease quantity"><Minus size={14} /></button><strong>{quantity}</strong><button onClick={() => setQuantity((value) => Math.min(5, value + 1))} aria-label="Increase quantity"><Plus size={14} /></button></div></div><span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: product.inStock ? "#31815c" : "var(--coral)", fontSize: ".75rem", fontWeight: 800 }}><Check size={15} />{product.inStock ? "In stock" : "Currently unavailable"}</span></div>
-          <div className="detail-actions"><button className="button button-primary" onClick={() => addToCart(product, variant, quantity)} disabled={!product.inStock}><span>Add to bag</span><ArrowRight size={15} /></button><button className="button button-outline" onClick={buyNow} disabled={!product.inStock}>Buy now</button></div><button className={`button button-outline button-block ${saved ? "" : ""}`} style={{ marginTop: 10 }} onClick={() => toggleWishlist(product.id)}><Heart size={15} fill={saved ? "currentColor" : "none"} />{saved ? "Saved to wishlist" : "Add to wishlist"}</button>
-          <div className="detail-block"><div className="detail-label"><span>Delivery checker</span><span style={{ color: "var(--muted)", fontWeight: 500 }}>{settings.deliveryEstimate}</span></div><div style={{ display: "flex", gap: 8 }}><input className="field-input" style={{ flex: 1, minHeight: 42, border: "1px solid var(--line)", borderRadius: 11, padding: "0 12px", outline: 0 }} value={pincode} onChange={(event) => setPincode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter pincode" inputMode="numeric" /><button className="button button-dark button-small" style={{ color: "var(--ink)", background: "var(--mist)" }} onClick={checkDelivery}>Check</button></div>{deliveryMessage && <div style={{ marginTop: 9, color: deliveryMessage.startsWith("Good") ? "#31815c" : "var(--coral)", fontSize: ".7rem" }}>{deliveryMessage}</div>}</div>
-          <div className="detail-meta"><div className="meta-tile"><Truck size={16} /><span>Fast delivery</span></div><div className="meta-tile"><RotateCcw size={16} /><span>{settings.returnsWindowDays}-day returns</span></div><div className="meta-tile"><ShieldCheck size={16} /><span>Secure checkout</span></div></div>
-        </div>
-      </div></div></section>
-      <section className="section-tight"><div className="container-wide"><SectionHeading eyebrow="Keep exploring" title="You may also like" description="Similar silhouettes, different energy." />{related.length > 0 ? <div className="product-grid">{related.map((item, index) => <ProductCard key={item.id} product={item} index={index} />)}</div> : <p style={{ color: "var(--muted)" }}>More pairs are arriving soon.</p>}</div></section>
-    </>
-  );
+export function ProductPage(){
+  const {slug}=useParams(); const navigate=useNavigate();
+  const {products,cart,addToCart,settings}=useApp(); const product=products.find(x=>x.slug===slug);
+  const [imageIndex,setImageIndex]=useState(0),[size,setSize]=useState(""),[color,setColor]=useState(""),[quantity,setQuantity]=useState(1),[pincode,setPincode]=useState(""),[deliveryMessage,setDeliveryMessage]=useState("");
+  const [visitOpen,setVisitOpen]=useState(false),[visit,setVisit]=useState({name:"",phone:"",email:""}),[visitBusy,setVisitBusy]=useState(false),[visitResult,setVisitResult]=useState("");
+  const [visitEnabled,setVisitEnabled]=useState(false),[visitDiscount,setVisitDiscount]=useState(0),[visitType,setVisitType]=useState<"percent"|"fixed">("percent");
+  useEffect(()=>{const c=getSupabaseClient();if(!c)return;c.from("business_settings").select("setting_value").eq("setting_key","store.settings").maybeSingle().then(({data})=>{const s=(data?.setting_value||{}) as any;setVisitEnabled(s.storeVisitEnabled!==false);setVisitDiscount(Number(s.storeVisitDiscount||0));setVisitType(s.storeVisitDiscountType==="fixed"?"fixed":"percent")})},[]);
+  useEffect(()=>{if(product){setColor(product.colors[0]||"");setSize("")}},[product?.id]);
+  if(!product)return <div className="section"><div className="container-narrow"><div className="empty-state"><h2>That pair has moved on.</h2><Link className="button button-primary" to="/shop">Back to shop <ArrowRight size={14}/></Link></div></div></div>;
+  const variant=useMemo(()=>size?product.variants.find(v=>v.size===size&&(!color||v.color===color)):undefined,[color,product.variants,size]);
+  const inCart=variant?cart.some(x=>x.productId===product.id&&x.variantId===variant.id):false;
+  const discount=product.compareAtPrice&&product.compareAtPrice>product.price?Math.round((1-product.price/product.compareAtPrice)*100):0;
+  const related=products.filter(x=>x.id!==product.id&&x.categoryIds.some(id=>product.categoryIds.includes(id))).slice(0,4);
+  const checkDelivery=()=>setDeliveryMessage(pincode.length===6?`We will confirm delivery to ${pincode} at checkout.`:"Enter a valid 6-digit pincode.");
+  const addOrCheckout=()=>{if(!size){setDeliveryMessage("Please select a size before adding to cart.");return}if(!variant){setDeliveryMessage("That size is not available.");return}if(inCart){navigate("/cart");return}addToCart(product,variant,quantity)};
+  const register=async()=>{setVisitBusy(true);setVisitResult("");try{const c=getSupabaseClient();if(!c)throw Error("Store registration is unavailable right now.");const {data,error}=await c.rpc("register_store_visit",{_product_id:product.id,_name:visit.name,_phone:visit.phone,_email:visit.email||null});if(error)throw error;const ref=String((data as any)?.referenceNumber||"");localStorage.setItem("rider-shoes:store-visit-reference",ref);setVisitResult(ref);setVisit({name:"",phone:"",email:""})}catch(e){setVisitResult(e instanceof Error?e.message:"Unable to register your store visit")}finally{setVisitBusy(false)}};
+  return <>
+    <Breadcrumbs current={product.name}/><section className="section-tight"><div className="container-wide"><div className="product-detail">
+      <div className="gallery"><div className="thumbs">{product.images.map((image,i)=><button key={image.id} className={`thumb ${imageIndex===i?"active":""}`} onClick={()=>setImageIndex(i)}><img src={image.url} alt={`${product.name} view ${i+1}`}/></button>)}</div><div className="gallery-main"><img src={product.images[imageIndex]?.url||product.imageUrl} alt={product.name}/></div></div>
+      <div className="detail-copy"><div className="product-brand">{product.brand?.name||"Rider collection"} · {product.badge||"Everyday movement"}</div><h1>{product.name}</h1><Stars rating={product.rating||0} reviewCount={product.reviewCount}/><p className="lead">{product.description}</p><div className="detail-price"><span className="price">₹{product.price.toLocaleString("en-IN")}</span>{product.compareAtPrice&&<span className="compare">₹{product.compareAtPrice.toLocaleString("en-IN")}</span>}{discount>0&&<span className="discount">{discount}% off</span>}</div>
+        {product.colors.length>0&&<div className="detail-block"><div className="detail-label"><span>Color</span><span>{color}</span></div><div className="color-list">{product.colors.map(c=><button key={c} className={`color-option ${color===c?"active":""}`} onClick={()=>setColor(c)}>{c}</button>)}</div></div>}
+        <div className="detail-block"><div className="detail-label"><span>Size</span><strong style={{color:"var(--coral)"}}>{size?`Selected ${size}`:"Select a size"}</strong></div><div className="size-list">{product.sizes.map(s=><button key={s} className={`size-option ${size===s?"active":""}`} onClick={()=>{setSize(s);setDeliveryMessage("")}}>{s}</button>)}</div></div>
+        <div className="detail-block" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:15}}><div><div className="detail-label" style={{marginBottom:8}}>Quantity</div><div className="quantity-control"><button onClick={()=>setQuantity(x=>Math.max(1,x-1))}><Minus size={14}/></button><strong>{quantity}</strong><button onClick={()=>setQuantity(x=>Math.min(5,x+1))}><Plus size={14}/></button></div></div><span style={{display:"inline-flex",alignItems:"center",gap:7,color:product.inStock?"#31815c":"var(--coral)",fontSize:".75rem",fontWeight:800}}><Check size={15}/>{product.inStock?"In stock":"Unavailable"}</span></div>
+        <div className="detail-actions"><button className="button button-primary" onClick={addOrCheckout} disabled={!product.inStock}>{inCart?"Checkout":"Add to cart"}<ArrowRight size={15}/></button>{visitEnabled&&<button className="button button-outline" onClick={()=>{setVisitOpen(true);setVisitResult("")}} disabled={!product.inStock}>Buy from Store</button>}</div>
+        {deliveryMessage&&<div className="error-text" style={{marginTop:10}}>{deliveryMessage}</div>}
+        <div className="detail-block"><div className="detail-label"><span>Delivery checker</span><span>{settings.deliveryEstimate}</span></div><div style={{display:"flex",gap:8}}><input value={pincode} onChange={e=>setPincode(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="Enter pincode" inputMode="numeric" style={{flex:1,minHeight:42,border:"1px solid var(--line)",borderRadius:11,padding:"0 12px"}}/><button className="button button-dark button-small" onClick={checkDelivery}>Check</button></div></div>
+        {visitEnabled&&visitDiscount>0&&<div className="detail-block" style={{background:"#fff7ef",borderRadius:12,padding:12}}><strong>Store visit offer</strong><div style={{fontSize:".72rem",marginTop:5,color:"var(--muted)"}}>Register a store visit and receive {visitType==="fixed"?`₹${visitDiscount}`:`${visitDiscount}%`} extra discount at the store.</div></div>}
+        <div className="detail-meta"><div className="meta-tile"><Truck size={16}/><span>Fast delivery</span></div><div className="meta-tile"><RotateCcw size={16}/><span>{settings.returnsWindowDays}-day returns</span></div><div className="meta-tile"><ShieldCheck size={16}/><span>Secure checkout</span></div></div>
+      </div></div></div></section>
+    <section className="section-tight"><div className="container-wide"><SectionHeading eyebrow="Keep exploring" title="You may also like" description="Similar silhouettes, different energy."/>{related.length?<div className="product-grid">{related.map((item,i)=><ProductCard key={item.id} product={item} index={i}/>)}</div>:<p style={{color:"var(--muted)"}}>More pairs are arriving soon.</p>}</div></section>
+    {visitOpen&&<div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(10,16,18,.6)",display:"grid",placeItems:"center",padding:18}}><div style={{background:"#fff",width:"min(480px,100%)",borderRadius:18,padding:22,position:"relative",boxShadow:"0 25px 80px rgba(0,0,0,.25)"}}><button onClick={()=>setVisitOpen(false)} style={{position:"absolute",right:14,top:14,border:0,background:"transparent"}}><X size={18}/></button><div className="eyebrow">BUY FROM STORE</div><h2 style={{margin:"7px 0"}}>Register your store visit</h2><p style={{fontSize:".75rem",color:"var(--muted)"}}>For <strong>{product.name}</strong>. Bring the reference to the store at checkout.</p>{visitResult.startsWith("RSV-")?<div style={{background:"#eef7f2",borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:".7rem",color:"#487761"}}>YOUR UNIQUE REFERENCE</div><strong style={{display:"block",fontSize:"1.55rem",letterSpacing:".08em",marginTop:5}}>{visitResult}</strong><p style={{fontSize:".7rem",color:"var(--muted)"}}>Save this number. The store will verify it before applying the discount.</p><button className="button button-primary" onClick={()=>setVisitOpen(false)}>Done</button></div>:<><div className="form-grid"><input placeholder="Name" value={visit.name} onChange={e=>setVisit({...visit,name:e.target.value})}/><input placeholder="Mobile number" value={visit.phone} onChange={e=>setVisit({...visit,phone:e.target.value})}/><input className="full" placeholder="Email (optional)" value={visit.email} onChange={e=>setVisit({...visit,email:e.target.value})}/></div>{visitResult&&<div className="error-text" style={{marginTop:10}}>{visitResult}</div>}<button className="button button-primary button-block" style={{marginTop:15}} onClick={register} disabled={visitBusy||!visit.name||!visit.phone}>{visitBusy?"Registering…":"Register visit & get reference"}</button></>}</div></div>}
+  </>;
 }
