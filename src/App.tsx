@@ -21,7 +21,10 @@ export function App(){
   const location=useLocation();
   const {isLoading,toast}=useApp();
   const isAdminPath=location.pathname.startsWith("/admin");
-  const currentHostname=String(location.hostname ?? "").trim().toLowerCase();
+  // React Router's Location object does not contain the browser hostname.
+  // Read it from window.location so the dedicated admin subdomain can be
+  // distinguished from the public storefront on the same Vercel deployment.
+  const currentHostname=typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
   const isAdminHost=Boolean(configuredAdminHost)&&currentHostname===configuredAdminHost;
   const adminHostMode=Boolean(configuredAdminHost);
 
@@ -30,9 +33,8 @@ export function App(){
     document.title=`${page||"Rider Shoes"} — Rider Shoes`;
   },[location.pathname]);
 
-  // The dedicated admin hostname uses the existing AdminWorkspace as the
-  // authentication gate. Do not redirect /admin back to itself before that
-  // login gate can render, otherwise the portal becomes a blank screen.
+  // Dedicated admin hostname: / is the protected admin entry point and
+  // /admin is only reachable after the admin hostname gate has been applied.
   if(adminHostMode && !isAdminHost && isAdminPath) return <Navigate to="/" replace/>;
   if(adminHostMode && isAdminHost && !isAdminPath) return <Navigate to="/admin" replace/>;
 
