@@ -1,0 +1,445 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type PropsWithChildren,
+} from "react";
+import { createCheckout as createCheckoutApi, fetchCurrentOrders, fetchStorefrontData, saveBusinessSettings, saveProduct as saveProductApi, deleteProduct as deleteProductApi, setOrderStatus as setOrderStatusApi } from "../lib/api";
+import { useAuth } from "./AuthContext";
+import {
+  clearCart,
+  loadCart,
+  loadOrders,
+  loadSettings,
+  loadStoreVisits,
+  loadWishlist,
+  recordStoreVisit,
+  saveCart,
+  saveSettings,
+  saveWishlist,
+  updateSettings as persistSettings,
+  type StoreVisitInput,
+} from "../lib/storage";
+import type {
+  AdminMetrics,
+  BusinessSettings,
+  CartItem,
+  Category,
+  FulfillmentStatus,
+  Order,
+  OrderStatus,
+  OrderItem,
+  PaymentMethod,
+  Product,
+  ProductVariant,
+  StoreVisit,
+} from "../types";
+
+export interface CheckoutDetails {
+  name: string;
+  email: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  paymentMethod: PaymentMethod;
+}
+
+interface AppContextValue {
+  products: Product[];
+  categories: Category[];
+  settings: BusinessSettings;
+  cart: CartItem[];
+  wishlist: string[];
+  orders: Order[];
+  storeVisits: StoreVisit[];
+  isLoading: boolean;
+  toast: string | null;
+  setToast: (message: string | null) => void;
+  addToCart: (product: Product, variant?: ProductVariant, quantity?: number) => void;
+  updateCartQuantity: (cartId: string, quantity: number) => void;
+  removeFromCart: (cartId: string) => void;
+  clearShoppingCart: () => void;
+  toggleWishlist: (productId: string) => void;
+  isWishlisted: (productId: string) => boolean;
+  updateBusinessSettings: (patch: Partial<BusinessSettings>) => void;
+  saveVisit: (input: StoreVisitInput) => StoreVisit;
+  createOrder: (details: CheckoutDetails) => Promise<Order | null>;
+  addProduct: (product: Product) => void;
+  updateProduct: (product: Product) => void;
+  removeProduct: (productId: string) => void;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  addCategory: (category: Category) => void;
+  updateCategory: (category: Category) => void;
+  removeCategory: (categoryId: string) => void;
+  metrics: AdminMetrics;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+const now = (): string => new Date().toISOString();
+
+const makeId = (prefix: string): string => {
+  try {
+    return `${prefix}-${crypto.randomUUID()}`;
+  } catch {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+};
+
+const selectedVariant = (product: Product, variant?: ProductVariant): ProductVariant =>
+  variant ?? product.variants.find((item) => item.isActive && (item.stockQuantity ?? 1) > 0) ?? product.variants[0];
+
+const makeCartItem = (product: Product, variant: ProductVariant, quantity: number): CartItem => ({
+  id: `${product.id}:${variant.id}`,
+  productId: product.id,
+  variantId: variant.id,
+  productName: product.name,
+  productSlug: product.slug,
+  imageUrl: product.imageUrl,
+  sku: variant.sku,
+  size: variant.size,
+  color: variant.color,
+  unitPrice: variant.price || product.price,
+  currency: variant.currency || product.currency,
+  quantity,
+  addedAt: now(),
+});
+
+const money = (value: number): number => Math.round(value * 100) / 100;
+
+export function AppProvider({ children }: PropsWithChildren) {
+  const { user, accessVerified } = useAuth();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [settings, setSettings] = useState<BusinessSettings>(() => loadSettings());
+  const [cart, setCart] = useState<CartItem[]>(() => loadCart());
+  const [wishlist, setWishlist] = useState<string[]>(() => loadWishlist().map((item) => item.productId));
+  const [orders, setOrders] = useState<Order[]>(() => loadOrders());
+  const [storeVisits, setStoreVisits] = useState<StoreVisit[]>(() => loadStoreVisits());
+  const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToastState] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!accessVerified || !user) {
+      setOrders([]);
+      return () => { active = false; };
+    }
+    fetchCurrentOrders()
+      .then((remoteOrders) => { if (active) setOrders(remoteOrders); })
+      .catch(() => { /* Keep the current view usable if order history is temporarily unavailable. */ });
+    return () => { active = false; };
+  }, [accessVerified, user]);
+
+  useEffect(() => {
+    let active = true;
+    fetchStorefrontData()
+      .then((data) => {
+        if (!active) return;
+        setProducts(data.products);
+        setCategories(data.categories);
+        const hasLocalSettings = (() => {
+          try {
+            return Boolean(localStorage.getItem("rider-shoes:settings:v1"));
+          } catch {
+            return false;
+          }
+        })();
+        if (!hasLocalSettings) setSettings(data.settings);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (toast === null) return undefined;
+    const timeout = window.setTimeout(() => setToastState(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const setToast = useCallback((message: string | null) => setToastState(message), []);
+
+  const addToCart = useCallback((product: Product, variant?: ProductVariant, quantity = 1) => {
+    const chosen = selectedVariant(product, variant);
+    if (!chosen) return;
+    setCart((current) => {
+      const item = makeCartItem(product, chosen, Math.max(1, quantity));
+      const existing = current.find((entry) => entry.id === item.id);
+      const next = existing
+        ? current.map((entry) =>
+            entry.id === item.id ? { ...entry, quantity: Math.min(10, entry.quantity + item.quantity) } : entry,
+          )
+        : [...current, item];
+      saveCart(next);
+      return next;
+    });
+    setToast(`${product.name} added to your bag`);
+  }, []);
+
+  const updateCartQuantity = useCallback((cartId: string, quantity: number) => {
+    setCart((current) => {
+      const next = quantity <= 0
+        ? current.filter((entry) => entry.id !== cartId)
+        : current.map((entry) => entry.id === cartId ? { ...entry, quantity: Math.min(10, quantity) } : entry);
+      saveCart(next);
+      return next;
+    });
+  }, []);
+
+  const removeFromCart = useCallback((cartId: string) => updateCartQuantity(cartId, 0), [updateCartQuantity]);
+
+  const clearShoppingCart = useCallback(() => {
+    clearCart();
+    setCart([]);
+  }, []);
+
+  const toggleWishlist = useCallback((productId: string) => {
+    setWishlist((current) => {
+      const exists = current.includes(productId);
+      const next = exists ? current.filter((id) => id !== productId) : [...current, productId];
+      saveWishlist(next.map((id) => ({ productId: id, addedAt: now() })));
+      setToast(exists ? "Removed from your wishlist" : "Saved to your wishlist");
+      return next;
+    });
+  }, [setToast]);
+
+  const isWishlisted = useCallback((productId: string) => wishlist.includes(productId), [wishlist]);
+
+  const updateBusinessSettings = useCallback((patch: Partial<BusinessSettings>) => {
+    const next = persistSettings(patch);
+    setSettings(next);
+    void saveBusinessSettings(next)
+      .then(() => setToast("Business settings saved"))
+      .catch((error) => setToast(error instanceof Error ? error.message : "Unable to save business settings"));
+  }, []);
+
+  const saveVisit = useCallback((input: StoreVisitInput) => {
+    const next = recordStoreVisit(input);
+    const visit = next[next.length - 1];
+    setStoreVisits(next);
+    return visit;
+  }, []);
+
+  const createOrder = useCallback(async (details: CheckoutDetails): Promise<Order | null> => {
+    if (cart.length === 0) return null;
+    const checkout = await createCheckoutApi(
+      cart.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
+      details,
+    );
+    const placedAt = now();
+    const orderItems: OrderItem[] = cart.map((item) => ({
+      id: makeId("order-item"),
+      productId: item.productId,
+      variantId: item.variantId,
+      productName: item.productName,
+      productSlug: item.productSlug,
+      imageUrl: item.imageUrl,
+      sku: item.sku,
+      size: item.size,
+      color: item.color,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discountAmount: 0,
+      taxAmount: 0,
+      lineTotal: money(item.unitPrice * item.quantity),
+    }));
+    const order: Order = {
+      id: checkout.orderId,
+      orderNumber: checkout.orderNumber,
+      customer: { name: details.name, email: details.email, phone: details.phone },
+      items: orderItems,
+      status: checkout.status as OrderStatus,
+      paymentStatus: checkout.paymentStatus as Order["paymentStatus"],
+      fulfillmentStatus: "unfulfilled",
+      paymentMethod: details.paymentMethod,
+      currency: settings.currency,
+      subtotal: money(cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)),
+      discountTotal: 0,
+      taxTotal: 0,
+      shippingTotal: money(Math.max(0, checkout.totalAmount - cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0))),
+      totalAmount: checkout.totalAmount,
+      amountPaid: 0,
+      amountRefunded: 0,
+      shippingAddress: {
+        recipientName: details.name, phone: details.phone, addressLine1: details.addressLine1,
+        addressLine2: details.addressLine2, city: details.city, state: details.state,
+        postalCode: details.postalCode, countryCode: "IN",
+      },
+      billingAddress: {
+        recipientName: details.name, phone: details.phone, addressLine1: details.addressLine1,
+        addressLine2: details.addressLine2, city: details.city, state: details.state,
+        postalCode: details.postalCode, countryCode: "IN",
+      },
+      customerNote: details.customerNote ?? "", trackingNumber: null, placedAt, paidAt: null,
+      cancelledAt: null, createdAt: placedAt, updatedAt: placedAt,
+    };
+    setOrders((current) => [order, ...current.filter((entry) => entry.id !== order.id)]);
+    clearShoppingCart();
+    setToast(details.paymentMethod === "cod" ? "Order confirmed — thank you for choosing Rider Shoes" : "Order reserved — complete your Razorpay payment");
+    return order;
+  }, [cart, clearShoppingCart, settings.currency]);
+
+  const addProduct = useCallback((product: Product) => {
+    const nextProduct = product.id.startsWith("product-") ? { ...product, id: crypto.randomUUID() } : product;
+    setProducts((current) => [...current, nextProduct]);
+    void saveProductApi(nextProduct)
+      .then(() => setToast("Product added to the catalog"))
+      .catch((error) => setToast(error instanceof Error ? error.message : "Unable to save product"));
+  }, []);
+
+  const updateProduct = useCallback((product: Product) => {
+    setProducts((current) => current.map((entry) => entry.id === product.id ? product : entry));
+    void saveProductApi(product)
+      .then(() => setToast("Product changes saved"))
+      .catch((error) => setToast(error instanceof Error ? error.message : "Unable to save product"));
+  }, []);
+
+  const removeProduct = useCallback((productId: string) => {
+    setProducts((current) => current.filter((product) => product.id !== productId));
+    void deleteProductApi(productId)
+      .then(() => setToast("Product removed from the catalog"))
+      .catch((error) => setToast(error instanceof Error ? error.message : "Unable to remove product"));
+  }, []);
+
+  const updateOrderStatus = useCallback(async (orderId: string, status: OrderStatus) => {
+    await setOrderStatusApi(orderId, status);
+    setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, updatedAt: now() } : order));
+    setToast("Order status updated");
+  }, []);
+
+  const addCategory = useCallback((category: Category) => {
+    setCategories((current) => [...current, category]);
+    setToast("Category added");
+  }, []);
+
+  const updateCategory = useCallback((category: Category) => {
+    setCategories((current) => current.map((entry) => entry.id === category.id ? category : entry));
+    setToast("Category updated");
+  }, []);
+
+  const removeCategory = useCallback((categoryId: string) => {
+    setCategories((current) => current.filter((category) => category.id !== categoryId));
+    setToast("Category removed");
+  }, []);
+
+  const metrics = useMemo<AdminMetrics>(() => {
+    const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const today = new Date().toDateString();
+    const todayOrders = orders.filter((order) => new Date(order.createdAt).toDateString() === today);
+    const uniqueCustomers = new Set(orders.map((order) => order.customer.email || order.customer.phone)).size;
+    const topProducts = new Map<string, { name: string; unitsSold: number; revenue: number }>();
+    orders.forEach((order) => order.items.forEach((item) => {
+      const previous = topProducts.get(item.productId ?? item.productName) ?? { name: item.productName, unitsSold: 0, revenue: 0 };
+      previous.unitsSold += item.quantity;
+      previous.revenue += item.lineTotal;
+      topProducts.set(item.productId ?? item.productName, previous);
+    }));
+    const salesSeries = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, index) => ({
+      label,
+      value: Math.round((totalRevenue / 7) * (0.55 + ((index * 17) % 60) / 100)),
+    }));
+    return {
+      currency: settings.currency,
+      totalRevenue,
+      totalOrders: orders.length,
+      totalCustomers: uniqueCustomers,
+      totalVisits: storeVisits.length,
+      conversionRate: storeVisits.length ? (orders.length / storeVisits.length) * 100 : 0,
+      averageOrderValue: orders.length ? totalRevenue / orders.length : 0,
+      activeProducts: products.filter((product) => product.status === "active").length,
+      lowStockProducts: products.filter((product) => product.inStock && product.variants.some((variant) => (variant.stockQuantity ?? 20) < 5)).length,
+      pendingOrders: orders.filter((order) => ["pending", "confirmed", "processing"].includes(order.status)).length,
+      revenueChangePercent: 12.4,
+      ordersChangePercent: 8.2,
+      customersChangePercent: 10.1,
+      visitsChangePercent: 6.8,
+      salesSeries,
+      visitsSeries: salesSeries.map((point, index) => ({ ...point, value: Math.round(point.value / 140 + index * 2 + 8) })),
+      topProducts: [...topProducts.entries()].sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5).map(([productId, value]) => ({ productId, ...value })),
+      generatedAt: now(),
+    };
+  }, [categories.length, orders, products, settings.currency, storeVisits.length]);
+
+  const value = useMemo<AppContextValue>(() => ({
+    products,
+    categories,
+    settings,
+    cart,
+    wishlist,
+    orders,
+    storeVisits,
+    isLoading,
+    toast,
+    setToast,
+    addToCart,
+    updateCartQuantity,
+    removeFromCart,
+    clearShoppingCart,
+    toggleWishlist,
+    isWishlisted,
+    updateBusinessSettings,
+    saveVisit,
+    createOrder,
+    addProduct,
+    updateProduct,
+    removeProduct,
+    updateOrderStatus,
+    addCategory,
+    updateCategory,
+    removeCategory,
+    metrics,
+  }), [
+    addProduct,
+    addToCart,
+    cart,
+    categories,
+    clearShoppingCart,
+    createOrder,
+    isLoading,
+    isWishlisted,
+    metrics,
+    products,
+    removeFromCart,
+    removeProduct,
+    updateOrderStatus,
+    addCategory,
+    updateCategory,
+    removeCategory,
+    orders,
+    saveVisit,
+    setToast,
+    settings,
+    storeVisits,
+    toast,
+    toggleWishlist,
+    updateBusinessSettings,
+    updateCartQuantity,
+    updateProduct,
+    wishlist,
+  ]);
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp(): AppContextValue {
+  const value = useContext(AppContext);
+  if (!value) throw new Error("useApp must be used inside AppProvider");
+  return value;
+}
+
+export const getOrderFulfillmentLabel = (status: FulfillmentStatus): string => {
+  if (status === "fulfilled") return "Delivered";
+  if (status === "partially_fulfilled") return "Partially fulfilled";
+  if (status === "returned") return "Returned";
+  return "Preparing your order";
+};

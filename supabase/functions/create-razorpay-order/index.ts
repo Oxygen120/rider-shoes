@@ -1,0 +1,150 @@
+import { errorResponse, isRecord, json, optionsResponse, parseJson } from '../_shared/http.ts';
+import { requireEnv } from '../_shared/env.ts';
+import { createAdminClient, AuthenticationError, requireUser } from '../_shared/supabase.ts';
+import {
+  razorpayFetch,
+  RazorpayRequestError,
+  type RazorpayOrder,
+} from '../_shared/razorpay.ts';
+
+const allowedOrderStatuses = new Set(['pending', 'payment_pending', 'confirmed']);
+const allowedPaymentStatuses = new Set(['pending', 'failed']);
+
+Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') return optionsResponse();
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  let userId: string;
+  try {
+    userId = (await requireUser(request)).user.id;
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return json({ error: error.message }, error.status);
+    }
+    return errorResponse(error);
+  }
+
+  try {
+    const body = await parseJson(request);
+    if (!isRecord(body) || typeof body.orderId !== 'string' || !body.orderId.trim()) {
+      return json({ error: 'orderId is required' }, 400);
+    }
+
+    const orderId = body.orderId.trim();
+    const admin = createAdminClient();
+    const { data: order, error: orderError } = await admin
+      .from('orders')
+      .select('id, order_number, profile_id, currency, total_amount, status, payment_status')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    // Deliberately return the same response for a missing order and an order
+    // owned by somebody else.
+    if (orderError || !order || order.profile_id !== userId) {
+      return json({ error: 'Order not found' }, 404);
+    }
+    if (!allowedOrderStatuses.has(order.status) || !allowedPaymentStatuses.has(order.payment_status)) {
+      return json({ error: 'Order is not eligible for payment' }, 409);
+    }
+
+    const amountInMajorUnits = Number(order.total_amount);
+    const amountInSmallestUnit = Math.round(amountInMajorUnits * 100);
+    if (!Number.isFinite(amountInSmallestUnit) || amountInSmallestUnit <= 0) {
+      return json({ error: 'Order has an invalid payable amount' }, 422);
+    }
+
+    const { data: existingPayment } = await admin
+      .from('payments')
+      .select('id, provider_order_id, provider_amount, amount, currency, status')
+      .eq('order_id', order.id)
+      .eq('provider', 'razorpay')
+      .in('status', ['created', 'authorized'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const keyId = requireEnv('RAZORPAY_KEY_ID');
+    if (
+      existingPayment?.provider_order_id &&
+      Number(existingPayment.provider_amount) === amountInSmallestUnit
+    ) {
+      return json({
+        orderId: order.id,
+        orderNumber: order.order_number,
+        razorpayOrderId: existingPayment.provider_order_id,
+        paymentId: existingPayment.id,
+        amount: amountInSmallestUnit,
+        currency: order.currency,
+        keyId,
+      });
+    }
+
+    // TODO(production): move provider-order creation plus the local payment
+    // insert behind a database-backed idempotency key/lock. The existing-row
+    // check handles ordinary retries but not two simultaneous first requests.
+    const razorpayOrder = await razorpayFetch<RazorpayOrder>('/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: amountInSmallestUnit,
+        currency: order.currency,
+        receipt: order.order_number,
+        notes: { local_order_id: order.id },
+      }),
+    });
+
+    if (
+      !razorpayOrder?.id ||
+      Number(razorpayOrder.amount) !== amountInSmallestUnit ||
+      razorpayOrder.currency !== order.currency
+    ) {
+      return json({ error: 'Payment provider returned an invalid order' }, 502);
+    }
+
+    const { data: payment, error: paymentError } = await admin
+      .from('payments')
+      .insert({
+        order_id: order.id,
+        provider: 'razorpay',
+        provider_order_id: razorpayOrder.id,
+        amount: amountInMajorUnits,
+        provider_amount: amountInSmallestUnit,
+        currency: order.currency,
+        status: 'created',
+        raw_response: {
+          id: razorpayOrder.id,
+          amount: razorpayOrder.amount,
+          currency: razorpayOrder.currency,
+          receipt: razorpayOrder.receipt,
+          status: razorpayOrder.status,
+        },
+      })
+      .select('id')
+      .single();
+
+    if (paymentError || !payment) {
+      // The provider order exists, but no secret or provider payload is
+      // returned. Reconciliation can use the local order number/notes.
+      console.error('Unable to persist local Razorpay payment record');
+      return json({ error: 'Unable to initialize payment' }, 502);
+    }
+
+    return json({
+      orderId: order.id,
+      orderNumber: order.order_number,
+      razorpayOrderId: razorpayOrder.id,
+      paymentId: payment.id,
+      amount: amountInSmallestUnit,
+      currency: order.currency,
+      keyId,
+    });
+  } catch (error) {
+    if (error instanceof RazorpayRequestError) {
+      return json({ error: 'Payment provider unavailable' }, 502);
+    }
+    if (error instanceof Error && error.message === 'Request body must be valid JSON') {
+      return json({ error: error.message }, 400);
+    }
+    console.error('create-razorpay-order failed');
+    return errorResponse(error);
+  }
+});

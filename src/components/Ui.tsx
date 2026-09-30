@@ -1,0 +1,170 @@
+import { motion, useReducedMotion } from "framer-motion";
+import {
+  ArrowRight,
+  Heart,
+  ShoppingBag,
+  Star,
+  type LucideIcon,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { useApp } from "../app/AppContext";
+import type { Category, Product } from "../types";
+
+export function Logo({ light = false }: { light?: boolean }) {
+  return (
+    <Link to="/" className="brand-lockup" aria-label="Rider Shoes home">
+      <span className="brand-mark" style={light ? { color: "#fff" } : undefined}>R<span>I</span>DER</span>
+      <span className="brand-submark">SHOES</span>
+    </Link>
+  );
+}
+
+export function Reveal({
+  children,
+  delay = 0,
+  className = "",
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  className?: string;
+}) {
+  const reduced = useReducedMotion();
+  return (
+    <motion.div
+      className={className}
+      initial={reduced ? undefined : { opacity: 0, y: 24 }}
+      whileInView={reduced ? undefined : { opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.12 }}
+      transition={{ duration: 0.62, delay, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+export function SectionHeading({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="section-head">
+      <div>
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        <h2 className="display-title">{title}</h2>
+      </div>
+      {description && <p>{description}</p>}
+      {action}
+    </div>
+  );
+}
+
+export function Stars({ rating = 0, reviewCount }: { rating?: number; reviewCount?: number }) {
+  return (
+    <div className="rating" aria-label={`${rating.toFixed(1)} out of 5 stars`}>
+      <span aria-hidden="true">{[0, 1, 2, 3, 4].map((index) => <Star key={index} size={12} fill={index < Math.round(rating) ? "currentColor" : "none"} />)}</span>
+      <span>{rating.toFixed(1)}{typeof reviewCount === "number" ? ` · ${reviewCount}` : ""}</span>
+    </div>
+  );
+}
+
+export function ProductCard({ product, index = 0 }: { product: Product; index?: number }) {
+  const { addToCart, toggleWishlist, isWishlisted } = useApp();
+  const saved = isWishlisted(product.id);
+  const discount = product.compareAtPrice && product.compareAtPrice > product.price
+    ? Math.round((1 - product.price / product.compareAtPrice) * 100)
+    : 0;
+  return (
+    <Reveal delay={Math.min(index * 0.05, .2)}>
+      <article className="product-card">
+        <div className="product-image-wrap">
+          <Link to={`/product/${product.slug}`} aria-label={`View ${product.name}`}>
+            <img src={product.imageUrl} alt={product.images[0]?.altText ?? product.name} loading="lazy" />
+          </Link>
+          {product.badge && <span className="product-badge">{product.badge}</span>}
+          <button className={`heart-button ${saved ? "saved" : ""}`} onClick={() => toggleWishlist(product.id)} aria-label={saved ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`}>
+            <Heart size={16} fill={saved ? "currentColor" : "none"} />
+          </button>
+        </div>
+        <div className="product-copy">
+          <div className="product-brand">{product.brand?.name ?? "Rider collection"}</div>
+          <Link to={`/product/${product.slug}`}><h3>{product.name}</h3></Link>
+          <p>{product.shortDescription}</p>
+          <Stars rating={product.rating ?? 0} reviewCount={product.reviewCount} />
+          <div className="price-row">
+            <span className="price">₹{product.price.toLocaleString("en-IN")}</span>
+            {product.compareAtPrice && <span className="compare">₹{product.compareAtPrice.toLocaleString("en-IN")}</span>}
+            {discount > 0 && <span className="discount">{discount}% off</span>}
+          </div>
+          <div className="product-footer">
+            <button className="button button-primary button-small" onClick={() => addToCart(product)}>
+              <ShoppingBag size={14} /> Add to bag
+            </button>
+            <Link className="button button-outline button-small" to={`/product/${product.slug}`}>
+              Details <ArrowRight size={13} />
+            </Link>
+          </div>
+        </div>
+      </article>
+    </Reveal>
+  );
+}
+
+export function CategoryCard({ category, index = 0 }: { category: Category; index?: number }) {
+  return (
+    <Reveal delay={index * .06}>
+      <Link className="category-card" to={`/category/${category.slug}`}>
+        <img src={category.imageUrl} alt={`${category.name} shoes`} loading="lazy" />
+        <div className="category-copy"><h3>{category.name}</h3><p>{category.description}</p></div>
+      </Link>
+    </Reveal>
+  );
+}
+
+export function TrustCard({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
+  return <Reveal><div className="trust-card"><div className="trust-icon"><Icon size={19} /></div><h3>{title}</h3><p>{text}</p></div></Reveal>;
+}
+
+export function PageLoader() {
+  return <div className="section"><div className="container-wide"><div className="skeleton" style={{ height: 360, borderRadius: 26 }} /></div></div>;
+}
+
+export function EmptyState({ icon: Icon, title, description, action }: { icon: LucideIcon; title: string; description: string; action?: React.ReactNode }) {
+  return <div className="empty-state"><Icon size={33} /><h2>{title}</h2><p>{description}</p>{action}</div>;
+}
+
+export function Field({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  required = false,
+  full = false,
+  min,
+  max,
+}: {
+  label: string;
+  name: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+  full?: boolean;
+  min?: string;
+  max?: string;
+}) {
+  return <div className={`field ${full ? "full" : ""}`}><label htmlFor={name}>{label}{required ? " *" : ""}</label><input id={name} name={name} type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} required={required} min={min} max={max} /></div>;
+}
+
+export function SocialIcon({ icon: Icon, label, href }: { icon: LucideIcon; label: string; href: string }) {
+  return <a className="icon-button" href={href} aria-label={label} target="_blank" rel="noreferrer"><Icon size={16} /></a>;
+}
