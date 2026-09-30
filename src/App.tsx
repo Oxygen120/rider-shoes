@@ -21,7 +21,8 @@ export function App(){
   const location=useLocation();
   const {isLoading,toast}=useApp();
   const isAdminPath=location.pathname.startsWith("/admin");
-  const isAdminHost=Boolean(configuredAdminHost)&&location.hostname.toLowerCase()===configuredAdminHost;
+  const currentHostname=String(location.hostname ?? "").trim().toLowerCase();
+  const isAdminHost=Boolean(configuredAdminHost)&&currentHostname===configuredAdminHost;
   const adminHostMode=Boolean(configuredAdminHost);
 
   useEffect(()=>{
