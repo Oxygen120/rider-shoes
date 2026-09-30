@@ -1,30 +1,63 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
 import { useAuth } from "../app/AuthContext";
 import { Field, Logo } from "../components/Ui";
 
 const ADMIN_UNLOCK_KEY = "rider_shoes_admin_unlocked";
 
 export function AdminAccessGate({ children }: { children: React.ReactNode }) {
-  const { user, accessVerified, loading, hasPermission, signIn, isConfigured } = useAuth();
+  const { user, accessVerified, accessError, loading, hasPermission, signIn, refreshAccess, isConfigured } = useAuth();
   const [unlocked, setUnlocked] = useState(() => {
     try { return sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1"; } catch { return false; }
   });
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
-    if (!user || !accessVerified || !hasPermission("orders.read_all")) {
+    if (!user) {
       setUnlocked(false);
       try { sessionStorage.removeItem(ADMIN_UNLOCK_KEY); } catch { /* ignore */ }
       return;
     }
-    try {
-      setUnlocked(sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1");
-    } catch {
-      setUnlocked(false);
+    if (accessVerified && hasPermission("orders.read_all")) {
+      try { sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1"); } catch { /* ignore */ }
+      setUnlocked(true);
     }
   }, [user, accessVerified, hasPermission]);
 
-  if (loading && unlocked) return <div className="admin-login"><div className="admin-login-card"><ShieldCheck size={28}/><h1>Verifying access…</h1><p>Checking your secure Rider Shoes admin session.</p></div></div>;
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await refreshAccess();
+      try { sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1"); } catch { /* ignore */ }
+      setUnlocked(true);
+    } catch {
+      // AuthContext deliberately keeps the Supabase session alive.
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  if (loading && (unlocked || user)) return <div className="admin-login"><div className="admin-login-card"><ShieldCheck size={28}/><h1>Verifying access…</h1><p>Checking your secure Rider Shoes admin session. Your login will remain active during refresh.</p></div></div>;
+
+  if (user && !accessVerified && accessError) {
+    return <div className="admin-login"><div className="admin-login-card">
+      <Logo light/>
+      <div className="admin-secure-badge"><ShieldCheck size={14}/> SESSION RESTORED · ACCESS CHECK</div>
+      <h1>One more security check</h1>
+      <p>Your Supabase session is still present, but the admin permission check needs another attempt. You are not being logged out.</p>
+      <div className="error-text" style={{marginTop:14}}>{accessError}</div>
+      <button className="button button-primary button-block" style={{marginTop:16}} onClick={()=>void retry()} disabled={retrying}>
+        <RefreshCw size={14}/> {retrying ? "Checking…" : "Retry security check"}
+      </button>
+    </div></div>;
+  }
+
+  if (user && accessVerified && !hasPermission("orders.read_all")) {
+    return <div className="admin-login"><div className="admin-login-card">
+      <Logo light/><div className="admin-secure-badge"><ShieldCheck size={14}/> ACCESS RESTRICTED</div>
+      <h1>Admin access required</h1><p>This account is signed in, but it does not have the required admin permission.</p>
+    </div></div>;
+  }
 
   if (!unlocked || !user || !accessVerified || !hasPermission("orders.read_all")) {
     return <AdminSignIn onSuccess={() => setUnlocked(true)} signIn={signIn} isConfigured={isConfigured}/>;
@@ -64,7 +97,7 @@ function AdminSignIn({ onSuccess, signIn, isConfigured }: {
       <Field label="Password" name="admin-gate-password" type="password" value={password} onChange={setPassword} required/>
       {error && <div className="error-text">{error}</div>}
       <button className="button button-primary button-block" style={{ marginTop: 16 }}>Sign in <ExternalLink size={14}/></button>
-      <small className="admin-session-note">This admin unlock is valid only for this browser tab. Closing the tab requires a fresh sign-in.</small>
+      <small className="admin-session-note">Your secure Supabase session persists through browser refresh. Closing this tab requires a fresh admin sign-in.</small>
     </form>
   </div>;
 }
