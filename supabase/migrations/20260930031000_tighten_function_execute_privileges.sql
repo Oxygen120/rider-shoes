@@ -1,0 +1,13 @@
+begin;
+revoke execute on function public.apply_store_visit_to_order() from public, anon, authenticated;
+revoke execute on function public.correct_cod_payment_amount() from public, anon, authenticated;
+revoke execute on function public.set_profile_active(uuid,boolean) from public, anon;
+revoke execute on function public.set_profile_role(uuid,text) from public, anon, authenticated;
+revoke execute on function public.list_admin_users() from public, anon;
+grant execute on function public.list_admin_users() to authenticated;
+revoke execute on function public.register_store_visit(uuid,text,text,text) from public, anon, authenticated;
+grant execute on function public.register_store_visit(uuid,text,text,text) to anon, authenticated;
+grant execute on function public.register_store_visit(text,text,text,uuid,date,time) to anon, authenticated;
+alter function public.set_updated_at() set search_path = pg_catalog, public;
+alter function public.generate_order_number() set search_path = pg_catalog, public;
+commit;
