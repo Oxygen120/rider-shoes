@@ -1,6 +1,6 @@
 import { errorResponse, isRecord, json, optionsResponse, parseJson } from '../_shared/http.ts';
 import { requireEnv } from '../_shared/env.ts';
-import { createAdminClient, AuthenticationError, requireUser } from '../_shared/supabase.ts';
+import { createAdminClient } from '../_shared/supabase.ts';
 import {
   razorpayFetch,
   RazorpayRequestError,
@@ -10,19 +10,17 @@ import {
 const allowedOrderStatuses = new Set(['pending', 'payment_pending', 'confirmed']);
 const allowedPaymentStatuses = new Set(['pending', 'failed']);
 
+async function resolveUserId(request: Request, admin: ReturnType<typeof createAdminClient>): Promise<string | null> {
+  const authorization = request.headers.get('Authorization');
+  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  const { data } = await admin.auth.getUser(match[1]);
+  return data.user?.id ?? null;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return optionsResponse();
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-
-  let userId: string;
-  try {
-    userId = (await requireUser(request)).user.id;
-  } catch (error) {
-    if (error instanceof AuthenticationError) {
-      return json({ error: error.message }, error.status);
-    }
-    return errorResponse(error);
-  }
 
   try {
     const body = await parseJson(request);
@@ -32,17 +30,17 @@ Deno.serve(async (request) => {
 
     const orderId = body.orderId.trim();
     const admin = createAdminClient();
+    const userId = await resolveUserId(request, admin);
     const { data: order, error: orderError } = await admin
       .from('orders')
       .select('id, order_number, profile_id, currency, total_amount, status, payment_status')
       .eq('id', orderId)
       .maybeSingle();
 
-    // Deliberately return the same response for a missing order and an order
-    // owned by somebody else.
-    if (orderError || !order || order.profile_id !== userId) {
-      return json({ error: 'Order not found' }, 404);
-    }
+    // Guest orders have a null profile_id and are protected by an unguessable
+    // UUID order id. Signed-in orders must still belong to the signed-in user.
+    const ownsOrder = order && (order.profile_id ? order.profile_id === userId : userId === null);
+    if (orderError || !order || !ownsOrder) return json({ error: 'Order not found' }, 404);
     if (!allowedOrderStatuses.has(order.status) || !allowedPaymentStatuses.has(order.payment_status)) {
       return json({ error: 'Order is not eligible for payment' }, 409);
     }
@@ -64,10 +62,7 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     const keyId = requireEnv('RAZORPAY_KEY_ID');
-    if (
-      existingPayment?.provider_order_id &&
-      Number(existingPayment.provider_amount) === amountInSmallestUnit
-    ) {
+    if (existingPayment?.provider_order_id && Number(existingPayment.provider_amount) === amountInSmallestUnit) {
       return json({
         orderId: order.id,
         orderNumber: order.order_number,
@@ -79,9 +74,6 @@ Deno.serve(async (request) => {
       });
     }
 
-    // TODO(production): move provider-order creation plus the local payment
-    // insert behind a database-backed idempotency key/lock. The existing-row
-    // check handles ordinary retries but not two simultaneous first requests.
     const razorpayOrder = await razorpayFetch<RazorpayOrder>('/orders', {
       method: 'POST',
       body: JSON.stringify({
@@ -92,11 +84,7 @@ Deno.serve(async (request) => {
       }),
     });
 
-    if (
-      !razorpayOrder?.id ||
-      Number(razorpayOrder.amount) !== amountInSmallestUnit ||
-      razorpayOrder.currency !== order.currency
-    ) {
+    if (!razorpayOrder?.id || Number(razorpayOrder.amount) !== amountInSmallestUnit || razorpayOrder.currency !== order.currency) {
       return json({ error: 'Payment provider returned an invalid order' }, 502);
     }
 
@@ -122,8 +110,6 @@ Deno.serve(async (request) => {
       .single();
 
     if (paymentError || !payment) {
-      // The provider order exists, but no secret or provider payload is
-      // returned. Reconciliation can use the local order number/notes.
       console.error('Unable to persist local Razorpay payment record');
       return json({ error: 'Unable to initialize payment' }, 502);
     }
@@ -138,12 +124,8 @@ Deno.serve(async (request) => {
       keyId,
     });
   } catch (error) {
-    if (error instanceof RazorpayRequestError) {
-      return json({ error: 'Payment provider unavailable' }, 502);
-    }
-    if (error instanceof Error && error.message === 'Request body must be valid JSON') {
-      return json({ error: error.message }, 400);
-    }
+    if (error instanceof RazorpayRequestError) return json({ error: 'Payment provider unavailable' }, 502);
+    if (error instanceof Error && error.message === 'Request body must be valid JSON') return json({ error: error.message }, 400);
     console.error('create-razorpay-order failed');
     return errorResponse(error);
   }
