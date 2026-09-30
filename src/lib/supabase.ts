@@ -19,8 +19,8 @@ const readPublicEnv = (): PublicEnv => {
   }
 };
 
-const isPlaceholder = (value: string): boolean => {
-  const normalized = value.trim().toLowerCase();
+const isPlaceholder = (value: string | null | undefined): boolean => {
+  const normalized = String(value ?? "").trim().toLowerCase();
   return normalized.length === 0 || /your[-_ ]|replace[-_ ]?with|placeholder|changeme|example\.com|<[^>]+>|\bxxx\b/.test(normalized);
 };
 
