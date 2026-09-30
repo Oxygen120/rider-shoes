@@ -1,135 +1,51 @@
 import { errorResponse, isRecord, json, optionsResponse, parseJson } from '../_shared/http.ts';
 import { requireEnv } from '../_shared/env.ts';
-import { createAdminClient } from '../_shared/supabase.ts';
-import {
-  razorpayFetch,
-  RazorpayRequestError,
-  safePaymentPayload,
-  verifyHmacHex,
-} from '../_shared/razorpay.ts';
+import { createAdminClient, AuthenticationError, requireUser } from '../_shared/supabase.ts';
+import { razorpayFetch, RazorpayRequestError, safePaymentPayload, verifyHmacHex } from '../_shared/razorpay.ts';
 
-function stringField(body: Record<string, unknown>, key: string): string | null {
-  const value = body[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-async function resolveUserId(request: Request, admin: ReturnType<typeof createAdminClient>): Promise<string | null> {
-  const authorization = request.headers.get('Authorization');
-  const match = authorization?.match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
-  const { data } = await admin.auth.getUser(match[1]);
-  return data.user?.id ?? null;
-}
+function stringField(body: Record<string, unknown>, key: string): string | null { const value = body[key]; return typeof value === 'string' && value.trim() ? value.trim() : null; }
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return optionsResponse();
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-
+  let userId: string;
+  try { userId = (await requireUser(request)).user.id; } catch (error) { if (error instanceof AuthenticationError) return json({ error: error.message }, error.status); return errorResponse(error); }
   try {
     const body = await parseJson(request);
     if (!isRecord(body)) return json({ error: 'Invalid request body' }, 400);
-
     const orderId = stringField(body, 'orderId');
     const razorpayOrderId = stringField(body, 'razorpayOrderId');
     const razorpayPaymentId = stringField(body, 'razorpayPaymentId');
     const razorpaySignature = stringField(body, 'razorpaySignature');
-    if (!orderId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-      return json({ error: 'orderId, razorpayOrderId, razorpayPaymentId, and razorpaySignature are required' }, 400);
-    }
-
+    if (!orderId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) return json({ error: 'orderId, razorpayOrderId, razorpayPaymentId, and razorpaySignature are required' }, 400);
     const admin = createAdminClient();
-    const userId = await resolveUserId(request, admin);
-    const { data: order, error: orderError } = await admin
-      .from('orders')
-      .select('id, profile_id, status, currency, total_amount, payment_status')
-      .eq('id', orderId)
-      .maybeSingle();
-    const ownsOrder = order && (order.profile_id ? order.profile_id === userId : userId === null);
-    if (orderError || !order || !ownsOrder) return json({ error: 'Order not found' }, 404);
+    const { data: order, error: orderError } = await admin.from('orders').select('id, profile_id, status, currency, total_amount, payment_status').eq('id', orderId).maybeSingle();
+    if (orderError || !order || order.profile_id !== userId) return json({ error: 'Order not found' }, 404);
     if (order.status === 'cancelled' || order.status === 'refunded') return json({ error: 'Order cannot accept a payment' }, 409);
-
-    const { data: localPayment, error: localPaymentError } = await admin
-      .from('payments')
-      .select('id, provider_order_id, amount, provider_amount, currency, status')
-      .eq('order_id', order.id)
-      .eq('provider', 'razorpay')
-      .eq('provider_order_id', razorpayOrderId)
-      .maybeSingle();
+    const { data: localPayment, error: localPaymentError } = await admin.from('payments').select('id, provider_order_id, amount, provider_amount, currency, status').eq('order_id', order.id).eq('provider', 'razorpay').eq('provider_order_id', razorpayOrderId).maybeSingle();
     if (localPaymentError || !localPayment) return json({ error: 'Payment session not found' }, 404);
-
-    const signatureValid = await verifyHmacHex(
-      requireEnv('RAZORPAY_KEY_SECRET'),
-      `${razorpayOrderId}|${razorpayPaymentId}`,
-      razorpaySignature,
-    );
+    const signatureValid = await verifyHmacHex(requireEnv('RAZORPAY_KEY_SECRET'), `${razorpayOrderId}|${razorpayPaymentId}`, razorpaySignature);
     if (!signatureValid) return json({ error: 'Payment signature could not be verified' }, 400);
-
     let providerPayment: Record<string, unknown>;
-    try {
-      providerPayment = await razorpayFetch<Record<string, unknown>>(
-        `/payments/${encodeURIComponent(razorpayPaymentId)}`,
-        { method: 'GET' },
-      );
-    } catch (error) {
-      if (error instanceof RazorpayRequestError) return json({ error: 'Unable to confirm payment with provider' }, 502);
-      throw error;
-    }
-
+    try { providerPayment = await razorpayFetch<Record<string, unknown>>(`/payments/${encodeURIComponent(razorpayPaymentId)}`, { method: 'GET' }); } catch (error) { if (error instanceof RazorpayRequestError) return json({ error: 'Unable to confirm payment with provider' }, 502); throw error; }
     const providerOrderId = providerPayment.order_id;
     const providerAmount = Number(providerPayment.amount);
     const expectedAmount = Math.round(Number(order.total_amount) * 100);
-    if (
-      providerOrderId !== razorpayOrderId ||
-      !Number.isFinite(providerAmount) ||
-      providerAmount !== expectedAmount ||
-      providerPayment.currency !== order.currency
-    ) return json({ error: 'Payment amount or order does not match' }, 400);
-
+    if (providerOrderId !== razorpayOrderId || !Number.isFinite(providerAmount) || providerAmount !== expectedAmount || providerPayment.currency !== order.currency) return json({ error: 'Payment amount or order does not match' }, 400);
     const providerStatus = typeof providerPayment.status === 'string' ? providerPayment.status : '';
-    if (providerStatus !== 'captured' && providerStatus !== 'authorized') {
-      return json({ verified: false, status: providerStatus || 'pending' }, 202);
-    }
-
+    if (providerStatus !== 'captured' && providerStatus !== 'authorized') return json({ verified: false, status: providerStatus || 'pending' }, 202);
     const localPaymentStatus = providerStatus === 'captured' ? 'captured' : 'authorized';
-    const { error: paymentUpdateError } = await admin
-      .from('payments')
-      .update({
-        provider_payment_id: razorpayPaymentId,
-        provider_amount: providerAmount,
-        amount: Number(order.total_amount),
-        currency: order.currency,
-        status: localPaymentStatus,
-        method: typeof providerPayment.method === 'string' ? providerPayment.method : null,
-        signature_verified: true,
-        raw_response: safePaymentPayload(providerPayment),
-        paid_at: providerStatus === 'captured' ? new Date().toISOString() : null,
-      })
-      .eq('id', localPayment.id);
+    const { error: paymentUpdateError } = await admin.from('payments').update({ provider_payment_id: razorpayPaymentId, provider_amount: providerAmount, amount: Number(order.total_amount), currency: order.currency, status: localPaymentStatus, method: typeof providerPayment.method === 'string' ? providerPayment.method : null, signature_verified: true, raw_response: safePaymentPayload(providerPayment), paid_at: providerStatus === 'captured' ? new Date().toISOString() : null }).eq('id', localPayment.id);
     if (paymentUpdateError) return json({ error: 'Unable to record payment' }, 500);
-
     if (providerStatus === 'captured') {
       const { error: inventoryError } = await admin.rpc('_commit_order_inventory', { _order_id: order.id });
       if (inventoryError) return json({ error: 'Payment verified; inventory reconciliation is required' }, 500);
-      const { error: orderUpdateError } = await admin
-        .from('orders')
-        .update({
-          payment_status: 'paid',
-          amount_paid: Number(order.total_amount),
-          paid_at: new Date().toISOString(),
-          status: order.status === 'pending' ? 'confirmed' : order.status,
-        })
-        .eq('id', order.id)
-        .neq('status', 'cancelled');
+      const { error: orderUpdateError } = await admin.from('orders').update({ payment_status: 'paid', amount_paid: Number(order.total_amount), paid_at: new Date().toISOString(), status: order.status === 'pending' ? 'confirmed' : order.status }).eq('id', order.id).neq('status', 'cancelled');
       if (orderUpdateError) return json({ error: 'Payment recorded; order update requires reconciliation' }, 500);
     } else {
-      const { error: orderUpdateError } = await admin
-        .from('orders')
-        .update({ payment_status: 'authorized' })
-        .eq('id', order.id)
-        .neq('status', 'cancelled');
+      const { error: orderUpdateError } = await admin.from('orders').update({ payment_status: 'authorized' }).eq('id', order.id).neq('status', 'cancelled');
       if (orderUpdateError) return json({ error: 'Payment recorded; order update requires reconciliation' }, 500);
     }
-
     return json({ verified: true, status: providerStatus, orderId: order.id, paymentId: localPayment.id });
   } catch (error) {
     if (error instanceof Error && error.message === 'Request body must be valid JSON') return json({ error: error.message }, 400);
