@@ -1,5 +1,5 @@
 import { defaultBusinessSettings } from "../data/demo";
-import type { BusinessSettings, CartItem, WishlistItem } from "../types";
+import type { BusinessSettings, CartItem, StoreVisit, WishlistItem } from "../types";
 
 /** Only non-sensitive guest shopping state is persisted in the browser. */
 export const STORAGE_KEYS = {
@@ -203,6 +203,43 @@ export const normalizeBusinessSettings = (value: unknown): BusinessSettings => {
     storeVisitTerms: stringValue(source.storeVisitTerms, defaults.storeVisitTerms),
     whatsappAutomationEnabled: booleanValue(source.whatsappAutomationEnabled, defaults.whatsappAutomationEnabled),
   };
+};
+
+/** Compatibility helpers for the legacy context layer. Private records are not persisted here. */
+export type StoreVisitInput = Pick<StoreVisit, "path"> & Partial<Omit<StoreVisit, "id" | "path" | "occurredAt">>;
+
+let memoryOrders: never[] = [];
+let memoryStoreVisits: StoreVisit[] = [];
+let memorySettings: BusinessSettings = defaultBusinessSettings;
+
+export const loadOrders = () => memoryOrders;
+export const loadStoreVisits = (): StoreVisit[] => memoryStoreVisits;
+
+export const loadSettings = (): BusinessSettings => memorySettings;
+
+export const updateSettings = (patch: Partial<BusinessSettings>): BusinessSettings => {
+  memorySettings = normalizeBusinessSettings({ ...memorySettings, ...patch });
+  return memorySettings;
+};
+
+export const saveSettings = (settings: BusinessSettings): boolean => {
+  memorySettings = normalizeBusinessSettings(settings);
+  return true;
+};
+
+export const recordStoreVisit = (input: StoreVisitInput): StoreVisit[] => {
+  const visit: StoreVisit = {
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `visit-${Date.now()}`,
+    profileId: input.profileId ?? null,
+    sessionIdHash: input.sessionIdHash ?? null,
+    path: input.path,
+    referrer: input.referrer ?? null,
+    userAgent: input.userAgent ?? (typeof navigator !== "undefined" ? navigator.userAgent : null),
+    metadata: input.metadata ?? {},
+    occurredAt: new Date().toISOString(),
+  };
+  memoryStoreVisits = [...memoryStoreVisits, visit];
+  return memoryStoreVisits;
 };
 
 export const getCart = loadCart;
