@@ -1,1 +1,1 @@
-export { AdminWorkspace } from "./AdminWorkspaceFixed";
+export { AdminWorkspace } from "../AdminExperienceEnhancer";
