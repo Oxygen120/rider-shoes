@@ -47,15 +47,11 @@ export const supabaseConfig = getPublicConfig();
 const createBrowserClient = (config: SupabasePublicConfig | null): SupabaseClient<Database> | null => {
   if (!config) return null;
   try {
-    try {
-      const projectRef = new URL(config.url).hostname.split(".")[0];
-      if (projectRef) window.localStorage.removeItem(`sb-${projectRef}-auth-token`);
-    } catch {
-      // Storage is optional.
-    }
     return createClient<Database>(config.url, config.anonKey, {
       auth: {
-        persistSession: false,
+        // Keep the Supabase session across browser refreshes. RLS and the
+        // server-side permission checks remain the authorization boundary.
+        persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
