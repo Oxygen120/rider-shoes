@@ -50,6 +50,8 @@ const parseAccess = (value: unknown): { roles: string[]; permissions: string[] }
   return { roles: stringArray(source.roles), permissions: stringArray(source.permissions) };
 };
 
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<User | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
@@ -72,15 +74,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const client = getSupabaseClient();
     if (!client) throw new Error("Supabase is not configured.");
     const sequence = ++verificationSequence.current;
-    const { data, error } = await client.rpc("my_access");
-    if (error) throw new Error(error.message || "Unable to verify account access.");
-    const access = parseAccess(data);
-    if (sequence !== verificationSequence.current) return;
-    setUser(candidate);
-    setRoles(access.roles);
-    setPermissions(access.permissions);
-    setAccessVerified(true);
-    setAccessError(null);
+    let lastError: Error | null = null;
+
+    // A browser refresh can race the Supabase token refresh. Retry the access
+    // RPC instead of treating a transient network/auth race as a real logout.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        if (attempt > 0) await wait(180 * Math.pow(2, attempt - 1));
+        const { data, error } = await client.rpc("my_access");
+        if (error) throw new Error(error.message || "Unable to verify account access.");
+        const access = parseAccess(data);
+        if (sequence !== verificationSequence.current) return;
+        setUser(candidate);
+        setRoles(access.roles);
+        setPermissions(access.permissions);
+        setAccessVerified(true);
+        setAccessError(null);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Unable to verify account access.");
+      }
+    }
+
+    throw lastError ?? new Error("Unable to verify account access.");
   }, []);
 
   const resolveSession = useCallback(async (candidate: User | null): Promise<void> => {
@@ -91,13 +107,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
     setLoading(true);
+    // Keep the candidate session alive while access verification retries. This
+    // is important on refresh: a transient RPC failure must never become a logout.
+    setUser(candidate);
     try {
       await verifyUser(candidate);
     } catch (error) {
-      clearAuthState();
+      setAccessVerified(false);
+      setRoles([]);
+      setPermissions([]);
       setAccessError(error instanceof Error ? error.message : "Unable to verify account access.");
-      // A session without a verified active profile must not become an app identity.
-      await getSupabaseClient()?.auth.signOut({ scope: "local" });
+      // Do NOT sign out here. Supabase owns session persistence; access checks
+      // can be retried without destroying a valid browser session.
     } finally {
       setLoading(false);
     }
@@ -124,7 +145,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const { data: listener } = client.auth.onAuthStateChange((event, session) => {
       if (!active) return;
       if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
-      // Supabase advises against awaiting another auth/client call inside the callback.
       window.setTimeout(() => {
         if (active) void resolveSession(session?.user ?? null);
       }, 0);
@@ -148,7 +168,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     try {
       await verifyUser(data.user);
     } catch (verifyError) {
-      await client.auth.signOut({ scope: "local" });
+      // Login failures are still rejected, but we avoid a second sign-out call
+      // that can race Supabase's session persistence on slow mobile networks.
       clearAuthState();
       const message = verifyError instanceof Error ? verifyError.message : "Unable to verify account access.";
       setAccessError(message);
