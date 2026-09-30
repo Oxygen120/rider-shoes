@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ArrowRight, Compass, Frown } from "lucide-react";
 import { useApp } from "./app/AppContext";
-import { useAuth } from "./app/AuthContext";
 import { CustomerShell } from "./components/SiteLayout";
 import { PageLoader } from "./components/Ui";
 import { HomePage } from "./pages/HomePage";
@@ -16,13 +15,11 @@ import { StoreVisitPageV2 } from "./pages/StoreVisitPageV2";
 import { AdminPolishedWorkspace } from "./pages/AdminPolishedWorkspace";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 
-// Admin portal hostname. VITE_ADMIN_HOST can override this later if needed.
 const configuredAdminHost = String(import.meta.env.VITE_ADMIN_HOST ?? "admin.ridershoes.coderiq.in").trim().toLowerCase();
 
 export function App(){
   const location=useLocation();
   const {isLoading,toast}=useApp();
-  const {user,accessVerified,loading:authLoading}=useAuth();
   const isAdminPath=location.pathname.startsWith("/admin");
   const isAdminHost=Boolean(configuredAdminHost)&&location.hostname.toLowerCase()===configuredAdminHost;
   const adminHostMode=Boolean(configuredAdminHost);
@@ -32,10 +29,11 @@ export function App(){
     document.title=`${page||"Rider Shoes"} — Rider Shoes`;
   },[location.pathname]);
 
-  /* When VITE_ADMIN_HOST is configured, the public storefront can never render
-     an admin route and the admin hostname can never render customer pages. */
+  // The dedicated admin hostname uses the existing AdminWorkspace as the
+  // authentication gate. Do not redirect /admin back to itself before that
+  // login gate can render, otherwise the portal becomes a blank screen.
   if(adminHostMode && !isAdminHost && isAdminPath) return <Navigate to="/" replace/>;
-  if(adminHostMode && isAdminHost && !isAdminPath) return <AdminEntry loading={authLoading} user={user} accessVerified={accessVerified}/>;
+  if(adminHostMode && isAdminHost && !isAdminPath) return <Navigate to="/admin" replace/>;
 
   if(isAdminPath) return <Routes>
     <Route path="/admin/users" element={<AdminUsersPage/>}/>
@@ -64,12 +62,6 @@ export function App(){
       </Routes>}
     </motion.div></AnimatePresence>
   </CustomerShell>
-}
-
-function AdminEntry({loading,user,accessVerified}:{loading:boolean;user:ReturnType<typeof useAuth>["user"];accessVerified:boolean}){
-  if(loading) return <div className="admin-login"><div className="admin-login-card"><h1>Verifying access…</h1><p>Checking your secure Rider Shoes admin session.</p></div></div>;
-  if(!user||!accessVerified) return <Navigate to="/admin" replace/>;
-  return <AdminPolishedWorkspace/>;
 }
 
 function NotFoundPage(){return <section className="section"><div className="container-narrow"><div className="empty-state" style={{border:"1px solid var(--line)",borderRadius:25,background:"#fff"}}><Frown size={35}/><div className="eyebrow">404</div><h2>That page took a different route.</h2><p>Let us get you back to the good stuff.</p><div style={{display:"flex",justifyContent:"center",gap:9,flexWrap:"wrap"}}><Link className="button button-primary" to="/">Go home <ArrowRight size={14}/></Link><Link className="button button-outline" to="/shop"><Compass size={14}/> Browse shoes</Link></div></div></div></section>}
