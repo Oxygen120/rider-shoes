@@ -1,0 +1,31 @@
+name: One-time admin refund UI patch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'Patch admin refund action to use secure Edge Function'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch refund handler and remove this workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/pages/AdminWorkspaceV4.tsx')
+          s = p.read_text()
+          old = "const refund=async()=>{setMsg('Refund action needs the Razorpay refund API secret configured server-side. The order has not been changed.')};"
+          new = "const refund=async()=>{if(!window.confirm('Refund the full refundable Razorpay amount for this order?'))return;const c=getSupabaseClient();if(!c)return;setBusy(true);setMsg('Processing refund…');try{const r=await c.functions.invoke('refund-razorpay-payment',{body:{orderId:order.id}});if(r.error||!r.data?.ok)throw Error(r.error?.message||r.data?.error||'Refund failed');setMsg(`Refund successful — ₹${Number(r.data.amount||0).toLocaleString('en-IN')}`);await saved()}catch(e){setMsg(e instanceof Error?e.message:'Refund failed')}finally{setBusy(false)}};"
+          if old not in s:
+            raise SystemExit('Expected refund handler not found; refusing to modify file')
+          p.write_text(s.replace(old, new, 1))
+          Path('.github/workflows/one-time-refund-ui-patch.yml').unlink()
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows/one-time-refund-ui-patch.yml
+          git commit -m 'Patch admin refund action to use secure Edge Function'
+          git push
