@@ -8,6 +8,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import "./styles.css";
 import "./glass-enhancements.css";
 import "./admin-product-modal.css";
+import "./forced-dark.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
