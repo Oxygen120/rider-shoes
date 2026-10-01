@@ -1,0 +1,39 @@
+name: Fix admin customers syntax
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Patch exact Customers syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text()
+          old="date:r.created_at,order:1}),...(v.data||[]).map"
+          new="date:r.created_at,order:1})),...(v.data||[]).map"
+          if old not in s:
+              raise SystemExit('Expected Customers syntax pattern was not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit verified fix and remove workflow
+        run: |
+          rm -f .github/workflows/fix-admin-customers-syntax.yml .github/workflows/fix-customers-build-once.yml TEMP_CUSTOMERS_TRIGGER.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows TEMP_CUSTOMERS_TRIGGER.txt
+          git commit -m 'Fix admin customers syntax and verify build'
+          git push origin HEAD:main
