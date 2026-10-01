@@ -1,0 +1,27 @@
+name: Inline WhatsApp handler once
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, 'INLINE WHATSAPP FIX')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inline order WhatsApp action
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text()
+          s=s.replace('<button className="v4-whatsapp" onClick={sendWhatsApp}><MessageCircle size={15}/> Send WhatsApp</button>','<button className="v4-whatsapp" onClick={()=>{const href=orderWhatsApp(order);if(!href){setMsg(\'Customer mobile number is missing or invalid.\');return}window.open(href,\'_blank\',\'noopener,noreferrer\')}}><MessageCircle size={15}/> Send WhatsApp</button>')
+          p.write_text(s)
+          PY
+          rm -f .github/workflows/inline-whatsapp-once.yml TEMP_INLINE_TRIGGER.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows TEMP_INLINE_TRIGGER.txt
+          git commit -m 'Inline manual WhatsApp order action'
+          git push origin HEAD:main
