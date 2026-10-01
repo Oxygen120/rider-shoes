@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {BarChart3,Boxes,ClipboardList,ExternalLink,LayoutDashboard,LogOut,Menu,MessageCircle,Plus,Search,ShoppingBag,Store,Truck,X} from 'lucide-react';
+import {BarChart3,Boxes,ClipboardList,ExternalLink,LayoutDashboard,LogOut,Menu,MessageCircle,Plus,Search,ShoppingBag,Store,Truck,X,Upload} from 'lucide-react';
 import {useAuth} from '../app/AuthContext';
 import {getSupabaseClient} from '../lib/supabase';
 
