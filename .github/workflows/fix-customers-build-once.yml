@@ -1,0 +1,42 @@
+name: Fix Customers build once
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, 'FIX CUSTOMERS BUILD')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Replace only Customers component with valid implementation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text()
+          start=s.index('function Customers(){')
+          end=s.index('function Visits(){', start)
+          new=r'''function Customers(){const [rows,setRows]=useState<any[]>([]),[q,setQ]=useState('');useEffect(()=>{const c=getSupabaseClient();if(!c)return;Promise.all([c.from('orders').select('id,created_at,shipping_address'),c.from('store_visits').select('id,occurred_at,customer_name,customer_phone,customer_email')]).then(([o,v])=>{const m=new Map<string,any>();for(const x of [...(o.data||[]).map((r:any)=>({name:r.shipping_address?.recipientName||'Customer',phone:r.shipping_address?.phone||'',email:r.shipping_address?.email||'',date:r.created_at,order:1})),...(v.data||[]).map((r:any)=>({name:r.customer_name||'Customer',phone:r.customer_phone||'',email:r.customer_email||'',date:r.occurred_at,visit:1}))]){const key=norm(x.phone)||String(x.email||'').toLowerCase()||`${x.name}-${x.phone}`;const old=m.get(key);if(!old)m.set(key,{id:key,name:x.name,phone:x.phone,email:x.email,orders:x.order||0,visits:x.visit||0,lastDate:x.date});else{old.orders+=x.order||0;old.visits+=x.visit||0;old.phone=old.phone||x.phone;old.email=old.email||x.email;old.name=old.name||x.name;old.lastDate=old.lastDate&&x.date?new Date(old.lastDate)>new Date(x.date)?old.lastDate:x.date:(old.lastDate||x.date)}}setRows([...m.values()].sort((a,b)=>new Date(b.lastDate||0).getTime()-new Date(a.lastDate||0).getTime()))})},[]);const list=rows.filter(x=>`${x.name} ${x.phone} ${x.email}`.toLowerCase().includes(q.toLowerCase()));return <><div className="v4-head"><div><small>RELATIONSHIPS</small><h2>Customers</h2><p>Customers who placed orders or registered store visits.</p></div></div><Card title={`${list.length} customers`}><div className="v4-toolbar"><div className="v4-search"><Search size={15}/><input placeholder="Search customer, mobile or email" value={q} onChange={e=>setQ(e.target.value)}/></div></div><div className="v4-table"><table><thead><tr><th>Customer</th><th>Mobile</th><th>Email</th><th>Orders</th><th>Visits</th><th>Last activity</th></tr></thead><tbody>{list.map(x=><tr key={x.id}><td><b>{x.name}</b></td><td>{x.phone||'—'}</td><td>{x.email||'—'}</td><td>{x.orders}</td><td>{x.visits}</td><td>{x.lastDate?new Date(x.lastDate).toLocaleString('en-IN'):'—'}</td></tr>)}</tbody></table></div></Card></>}
+'''
+          s=s[:start]+new+s[end:]
+          p.write_text(s)
+          PY
+      - name: Build before committing
+        run: |
+          npm ci
+          npm run build
+      - name: Commit verified fix
+        run: |
+          rm -f .github/workflows/fix-customers-build-once.yml TEMP_CUSTOMERS_TRIGGER.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows TEMP_CUSTOMERS_TRIGGER.txt
+          git commit -m 'Fix admin customers build syntax'
+          git push origin HEAD:main
