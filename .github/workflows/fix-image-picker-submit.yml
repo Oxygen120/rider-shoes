@@ -1,0 +1,35 @@
+name: Fix image picker modal submit behavior
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Prevent crop controls from submitting parent forms
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text()
+          old=s
+          s=s.replace('<button onClick={onCancel}>','<button type="button" onClick={onCancel}>')
+          s=s.replace('<button onClick={finish}>','<button type="button" onClick={finish}>')
+          s=s.replace('<button onClick={onDone}>','<button type="button" onClick={onDone}>')
+          if s==old:
+              raise SystemExit('No matching crop control found; refusing to modify source.')
+          p.write_text(s)
+          PY
+      - name: Commit and remove one-time workflow
+        run: |
+          rm -f .github/workflows/fix-image-picker-submit.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows/fix-image-picker-submit.yml
+          git commit -m 'Fix product and category image picker form submit'
+          git push origin HEAD:main
