@@ -1,15 +1,15 @@
 import { errorResponse, isRecord, json, optionsResponse, parseJson } from '../_shared/http.ts';
 import { requireEnv } from '../_shared/env.ts';
-import { createAdminClient, AuthenticationError, requireUser } from '../_shared/supabase.ts';
+import { createAdminClient, AuthenticationError, getOptionalUser } from '../_shared/supabase.ts';
 import { razorpayFetch, RazorpayRequestError, safePaymentPayload, verifyHmacHex } from '../_shared/razorpay.ts';
 
 function stringField(body: Record<string, unknown>, key: string): string | null { const value = body[key]; return typeof value === 'string' && value.trim() ? value.trim() : null; }
+const normalizePhone = (value: string) => value.replace(/\D/g, '');
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return optionsResponse();
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  let userId: string;
-  try { userId = (await requireUser(request)).user.id; } catch (error) { if (error instanceof AuthenticationError) return json({ error: error.message }, error.status); return errorResponse(error); }
   try {
     const body = await parseJson(request);
     if (!isRecord(body)) return json({ error: 'Invalid request body' }, 400);
@@ -17,10 +17,26 @@ Deno.serve(async (request) => {
     const razorpayOrderId = stringField(body, 'razorpayOrderId');
     const razorpayPaymentId = stringField(body, 'razorpayPaymentId');
     const razorpaySignature = stringField(body, 'razorpaySignature');
+    const customerPhone = stringField(body, 'customerPhone');
+    const customerEmail = stringField(body, 'customerEmail');
     if (!orderId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) return json({ error: 'orderId, razorpayOrderId, razorpayPaymentId, and razorpaySignature are required' }, 400);
+    const user = await getOptionalUser(request);
     const admin = createAdminClient();
-    const { data: order, error: orderError } = await admin.from('orders').select('id, profile_id, status, currency, total_amount, payment_status').eq('id', orderId).maybeSingle();
-    if (orderError || !order || order.profile_id !== userId) return json({ error: 'Order not found' }, 404);
+    const { data: order, error: orderError } = await admin.from('orders').select('id, profile_id, status, currency, total_amount, payment_status, shipping_address').eq('id', orderId).maybeSingle();
+    if (orderError || !order) return json({ error: 'Order not found' }, 404);
+
+    if (user) {
+      if (order.profile_id !== user.id) return json({ error: 'Order not found' }, 404);
+    } else {
+      if (order.profile_id) return json({ error: 'Authentication required for this order' }, 401);
+      const shipping = isRecord(order.shipping_address) ? order.shipping_address : {};
+      const orderPhone = typeof shipping.phone === 'string' ? normalizePhone(shipping.phone) : '';
+      const orderEmail = typeof shipping.email === 'string' ? normalizeEmail(shipping.email) : '';
+      const suppliedPhone = customerPhone ? normalizePhone(customerPhone) : '';
+      const suppliedEmail = customerEmail ? normalizeEmail(customerEmail) : '';
+      if (!suppliedPhone || !orderPhone || suppliedPhone !== orderPhone || (suppliedEmail && orderEmail && suppliedEmail !== orderEmail)) return json({ error: 'Customer details do not match this order' }, 403);
+    }
+
     if (order.status === 'cancelled' || order.status === 'refunded') return json({ error: 'Order cannot accept a payment' }, 409);
     const { data: localPayment, error: localPaymentError } = await admin.from('payments').select('id, provider_order_id, amount, provider_amount, currency, status').eq('order_id', order.id).eq('provider', 'razorpay').eq('provider_order_id', razorpayOrderId).maybeSingle();
     if (localPaymentError || !localPayment) return json({ error: 'Payment session not found' }, 404);
@@ -48,6 +64,7 @@ Deno.serve(async (request) => {
     }
     return json({ verified: true, status: providerStatus, orderId: order.id, paymentId: localPayment.id });
   } catch (error) {
+    if (error instanceof AuthenticationError) return json({ error: error.message }, error.status);
     if (error instanceof Error && error.message === 'Request body must be valid JSON') return json({ error: error.message }, 400);
     console.error('verify-razorpay-payment failed');
     return errorResponse(error);
