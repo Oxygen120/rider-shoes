@@ -1,0 +1,30 @@
+name: Fix manual WhatsApp button once
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, 'FIX WHATSAPP BUTTON')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Insert manual WhatsApp handler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text()
+          needle="const [busy,setBusy]=useState(false),[msg,setMsg]=useState('');"
+          handler="const sendWhatsApp=()=>{const href=orderWhatsApp(order);if(!href){setMsg('Customer mobile number is missing or invalid.');return}window.open(href,'_blank','noopener,noreferrer')};"
+          if 'const sendWhatsApp=' not in s and needle in s:
+              s=s.replace(needle,needle+handler,1)
+          p.write_text(s)
+          PY
+          rm -f .github/workflows/fix-send-whatsapp-once.yml TEMP_WHATSAPP_TRIGGER.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows TEMP_WHATSAPP_TRIGGER.txt
+          git commit -m 'Fix manual WhatsApp button handler'
+          git push origin HEAD:main
