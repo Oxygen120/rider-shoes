@@ -59,3 +59,11 @@ export async function requireUser(request: Request): Promise<{
   }
   return { client, user: data.user };
 }
+
+export async function getOptionalUser(request: Request): Promise<User | null> {
+  try {
+    return (await requireUser(request)).user;
+  } catch {
+    return null;
+  }
+}
