@@ -1,13 +1,15 @@
-/* Product modal only: input[file] is unique to the product editor. */
+/* Product modal: stable glass theme with explicit contrast and responsive layout. */
 .v4-modal:has(input[type="file"]){
   width:min(960px,calc(100vw - 32px)) !important;
   max-height:min(92vh,900px) !important;
   overflow:auto !important;
   padding:0 !important;
+  box-sizing:border-box !important;
   border:1px solid rgba(255,255,255,.16) !important;
   border-radius:28px !important;
-  background:linear-gradient(145deg,rgba(25,24,34,.94),rgba(12,12,18,.90)) !important;
-  box-shadow:0 30px 90px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08) !important;
+  background:linear-gradient(145deg,rgba(25,24,34,.97),rgba(12,12,18,.96)) !important;
+  color:#f7f5fb !important;
+  box-shadow:0 30px 90px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.08) !important;
   backdrop-filter:blur(24px) saturate(135%) !important;
   -webkit-backdrop-filter:blur(24px) saturate(135%) !important;
 }
@@ -16,11 +18,40 @@
   position:sticky !important;
   top:0 !important;
   z-index:5 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
   padding:22px 26px !important;
   margin:0 !important;
-  background:linear-gradient(180deg,rgba(28,27,38,.98),rgba(28,27,38,.84)) !important;
-  border-bottom:1px solid rgba(255,255,255,.09) !important;
+  background:linear-gradient(180deg,rgba(28,27,38,.99),rgba(28,27,38,.90)) !important;
+  color:#fff !important;
+  border-bottom:1px solid rgba(255,255,255,.10) !important;
   backdrop-filter:blur(20px) !important;
+}
+
+.v4-modal:has(input[type="file"]) .v4-modal-head h2,
+.v4-modal:has(input[type="file"]) .v4-modal-head small{
+  color:#fff !important;
+}
+
+.v4-modal:has(input[type="file"]) .v4-modal-head small,
+.v4-modal:has(input[type="file"]) label,
+.v4-modal:has(input[type="file"]) h3,
+.v4-modal:has(input[type="file"]) h4,
+.v4-modal:has(input[type="file"]) p,
+.v4-modal:has(input[type="file"]) span{
+  color:#f3f0f8 !important;
+}
+
+.v4-modal:has(input[type="file"]) .v4-modal-head button{
+  color:#fff !important;
+  background:rgba(255,255,255,.08) !important;
+  border:1px solid rgba(255,255,255,.12) !important;
+  border-radius:11px !important;
+  width:40px !important;
+  height:40px !important;
+  display:grid !important;
+  place-items:center !important;
 }
 
 .v4-modal:has(input[type="file"]) > :not(.v4-modal-head){
@@ -33,17 +64,19 @@
   grid-template-columns:repeat(2,minmax(0,1fr)) !important;
   gap:16px !important;
   align-items:start !important;
-  width:100% !important;
+  width:auto !important;
   margin-top:18px !important;
 }
 
 .v4-modal:has(input[type="file"]) label{
   display:flex !important;
   flex-direction:column !important;
+  align-items:stretch !important;
   gap:7px !important;
   min-width:0 !important;
   font-size:12px !important;
   font-weight:700 !important;
+  line-height:1.35 !important;
   letter-spacing:.02em !important;
 }
 
@@ -55,13 +88,27 @@
   min-height:46px !important;
   box-sizing:border-box !important;
   padding:11px 13px !important;
-  border:1px solid rgba(255,255,255,.13) !important;
+  border:1px solid rgba(255,255,255,.16) !important;
   border-radius:13px !important;
   outline:none !important;
-  background:rgba(255,255,255,.065) !important;
-  color:inherit !important;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.035) !important;
-  transition:border-color .18s ease,background .18s ease,box-shadow .18s ease,transform .18s ease !important;
+  background:rgba(255,255,255,.075) !important;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+  caret-color:#fff !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04) !important;
+  transition:border-color .18s ease,background .18s ease,box-shadow .18s ease !important;
+}
+
+.v4-modal:has(input[type="file"]) input::placeholder,
+.v4-modal:has(input[type="file"]) textarea::placeholder{
+  color:rgba(255,255,255,.55) !important;
+  opacity:1 !important;
+}
+
+.v4-modal:has(input[type="file"]) select option,
+.v4-modal:has(input[type="file"]) select optgroup{
+  background:#1b1924 !important;
+  color:#fff !important;
 }
 
 .v4-modal:has(input[type="file"]) textarea{
@@ -73,9 +120,9 @@
 .v4-modal:has(input[type="file"]) input:not([type="checkbox"]):not([type="file"]):focus,
 .v4-modal:has(input[type="file"]) select:focus,
 .v4-modal:has(input[type="file"]) textarea:focus{
-  border-color:rgba(184,145,255,.7) !important;
-  background:rgba(255,255,255,.085) !important;
-  box-shadow:0 0 0 3px rgba(155,105,255,.13),inset 0 1px 0 rgba(255,255,255,.05) !important;
+  border-color:rgba(190,150,255,.78) !important;
+  background:rgba(255,255,255,.105) !important;
+  box-shadow:0 0 0 3px rgba(155,105,255,.15),inset 0 1px 0 rgba(255,255,255,.06) !important;
 }
 
 .v4-modal:has(input[type="file"]) input[type="file"]{
@@ -83,9 +130,21 @@
   min-height:48px !important;
   box-sizing:border-box !important;
   padding:10px !important;
-  border:1px dashed rgba(255,255,255,.22) !important;
+  border:1px dashed rgba(255,255,255,.25) !important;
   border-radius:14px !important;
-  background:rgba(255,255,255,.045) !important;
+  background:rgba(255,255,255,.05) !important;
+  color:#fff !important;
+  font-size:13px !important;
+}
+
+.v4-modal:has(input[type="file"]) input[type="file"]::file-selector-button{
+  margin-right:10px !important;
+  padding:8px 12px !important;
+  border:1px solid rgba(255,255,255,.16) !important;
+  border-radius:9px !important;
+  background:rgba(255,255,255,.10) !important;
+  color:#fff !important;
+  cursor:pointer !important;
 }
 
 .v4-modal:has(input[type="file"]) .v4-actions{
@@ -99,7 +158,7 @@
   margin:24px -26px 0 !important;
   padding:16px 26px !important;
   border-top:1px solid rgba(255,255,255,.09) !important;
-  background:rgba(17,16,23,.92) !important;
+  background:rgba(17,16,23,.96) !important;
   backdrop-filter:blur(18px) !important;
 }
 
@@ -110,30 +169,18 @@
   padding:10px 18px !important;
 }
 
+.v4-modal:has(input[type="file"]) .v4-primary{color:#fff !important;}
+.v4-modal:has(input[type="file"]) .v4-secondary{color:#f3f0f8 !important;}
+
 @media (max-width:700px){
   .v4-modal:has(input[type="file"]){
     width:calc(100vw - 18px) !important;
     max-height:94vh !important;
     border-radius:22px !important;
   }
-  .v4-modal:has(input[type="file"]) .v4-modal-head{
-    padding:17px 18px !important;
-  }
-  .v4-modal:has(input[type="file"]) > :not(.v4-modal-head){
-    margin-left:18px;
-    margin-right:18px;
-  }
-  .v4-modal:has(input[type="file"]) .v4-form-grid{
-    grid-template-columns:1fr !important;
-    gap:13px !important;
-    margin-top:14px !important;
-  }
-  .v4-modal:has(input[type="file"]) .v4-actions{
-    margin-left:-18px !important;
-    margin-right:-18px !important;
-    padding:13px 18px !important;
-  }
-  .v4-modal:has(input[type="file"]) .v4-actions button{
-    flex:1 1 140px !important;
-  }
+  .v4-modal:has(input[type="file"]) .v4-modal-head{padding:17px 18px !important;}
+  .v4-modal:has(input[type="file"]) > :not(.v4-modal-head){margin-left:18px;margin-right:18px;}
+  .v4-modal:has(input[type="file"]) .v4-form-grid{grid-template-columns:1fr !important;gap:13px !important;margin-top:14px !important;}
+  .v4-modal:has(input[type="file"]) .v4-actions{margin-left:-18px !important;margin-right:-18px !important;padding:13px 18px !important;}
+  .v4-modal:has(input[type="file"]) .v4-actions button{flex:1 1 140px !important;}
 }
