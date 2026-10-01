@@ -1,0 +1,26 @@
+name: Fix product image import once
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, 'FIX UPLOAD IMPORT')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add Upload icon import
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/AdminWorkspaceV4.tsx')
+          s=p.read_text().replace('Store,Truck,X} from \'lucide-react\';','Store,Truck,X,Upload} from \'lucide-react\';')
+          p.write_text(s)
+          PY
+          rm -f .github/workflows/fix-upload-import-once.yml TEMP_UPLOAD_TRIGGER.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AdminWorkspaceV4.tsx .github/workflows TEMP_UPLOAD_TRIGGER.txt
+          git commit -m 'Fix product image upload import'
+          git push origin HEAD:main
